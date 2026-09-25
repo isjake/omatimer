@@ -1,36 +1,58 @@
 // omatimer - a native Qt6 rewrite of papertimer.
-// Type a duration, hit Enter/Space to start or stop, R to reset, B to cycle
-// the background, [ / ] to change transparency, Ctrl+M to mute.
+// Type a duration, hit Enter/Space to start or stop, R to reset, B to swap
+// between the dark and light background, Ctrl+M to mute.
 
 #include <QApplication>
 #include <QWidget>
+#include <QAbstractButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPushButton>
 #include <QTimer>
 #include <QKeyEvent>
 #include <QRegularExpression>
 #include <QDateTime>
 #include <QSettings>
-#include <QProcess>
 #include <QFileInfo>
-#include <QStandardPaths>
-#include <QFileSystemWatcher>
 #include <QFile>
 #include <QDir>
 #include <QHash>
 #include <QFont>
-#include <QResizeEvent>
+#include <QFontDatabase>
 #include <QPainter>
+#include <QPainterPath>
+#include <QtMath>
+#include <QPaintEvent>
+#include <QResizeEvent>
 #include <QStyle>
 #include <QStyleOption>
+#include <QStandardPaths>
+#include <QProcess>
+#include <QFileSystemWatcher>
 
 static const char *kCompleteSound =
     "/usr/share/sounds/freedesktop/stereo/complete.oga";
 static const char *kBellSound =
     "/usr/share/sounds/freedesktop/stereo/message.oga";
+
+// The face omacalc and omawrite use, so the three apps look related.
+static QString uiFontFamily()
+{
+    for (const char *want : {"iA Writer Mono S", "iA Writer Duospace"})
+        if (QFontDatabase::families().contains(QString::fromUtf8(want)))
+            return QString::fromUtf8(want);
+    return QStringLiteral("monospace");
+}
+
+// omacalc builds every surface by mixing ink into the page rather than
+// hardcoding greys, which is what keeps it in step with the theme.
+static QColor mix(const QColor &base, const QColor &tint, qreal amount)
+{
+    return QColor::fromRgbF(base.redF() + (tint.redF() - base.redF()) * amount,
+                            base.greenF() + (tint.greenF() - base.greenF()) * amount,
+                            base.blueF() + (tint.blueF() - base.blueF()) * amount);
+}
 
 // "90" -> 90, "1h 30m 10s" -> 5410, "1.5m" -> 90
 static int parseDurationToSeconds(const QString &input)
@@ -63,6 +85,161 @@ static QString clockString(const QDateTime &t)
     return t.time().toString("h:mm:ss");
 }
 
+// Icons are drawn, not typed: the glyphs for these shapes are missing from
+// plenty of monospace faces and render as tofu when they are.
+class IconButton : public QAbstractButton
+{
+public:
+    enum Kind { Play, Pause, Reset, Contrast };
+
+    IconButton(Kind kind, QWidget *parent = nullptr)
+        : QAbstractButton(parent), kind(kind)
+    {
+        setCursor(Qt::PointingHandCursor);
+        setFocusPolicy(Qt::NoFocus);
+        setAttribute(Qt::WA_Hover, true);
+    }
+
+    void setKind(Kind k) { kind = k; update(); }
+    void setColors(const QColor &p, const QColor &i)
+    {
+        page = p;
+        ink = i;
+        update();
+    }
+    void setChrome(bool on) { chrome = on; update(); } // false = bare glyph
+
+protected:
+    QSize sizeHint() const override { return QSize(64, 64); }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        // Resting lift, plus a little more under the pointer and more again
+        // while held - the same three-step feedback omacalc uses.
+        qreal lift = chrome ? 0.05 : 0.0;
+        if (underMouse()) lift += 0.045;
+        if (isDown()) lift += 0.09;
+
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        const QRectF r = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+        if (chrome) {
+            const qreal radius = qMin(14.0, height() * 0.18);
+            p.setPen(QPen(mix(page, ink, 0.13), 1.0));
+            p.setBrush(mix(page, ink, lift));
+            p.drawRoundedRect(r, radius, radius);
+        } else if (lift > 0.0) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(mix(page, ink, lift));
+            p.drawEllipse(r);
+        }
+
+        const qreal s = qMin(width(), height()) * (chrome ? 0.36 : 0.52);
+        const QPointF c = r.center();
+        p.setPen(Qt::NoPen);
+        p.setBrush(ink);
+
+        switch (kind) {
+        case Play: {
+            // Nudged right so the triangle looks optically centred.
+            QPainterPath path;
+            path.moveTo(c.x() - s * 0.42 + s * 0.12, c.y() - s * 0.58);
+            path.lineTo(c.x() + s * 0.62 + s * 0.12, c.y());
+            path.lineTo(c.x() - s * 0.42 + s * 0.12, c.y() + s * 0.58);
+            path.closeSubpath();
+            p.drawPath(path);
+            break;
+        }
+        case Pause: {
+            const qreal w = s * 0.24, gap = s * 0.22, h = s * 0.58;
+            p.drawRoundedRect(QRectF(c.x() - gap - w, c.y() - h, w, h * 2), w * 0.35, w * 0.35);
+            p.drawRoundedRect(QRectF(c.x() + gap, c.y() - h, w, h * 2), w * 0.35, w * 0.35);
+            break;
+        }
+        case Reset: {
+            // An arc with an arrowhead, rather than a glyph.
+            const qreal rad = s * 0.52;
+            const qreal thick = qMax(1.6, s * 0.17);
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(ink, thick, Qt::SolidLine, Qt::RoundCap));
+            const QRectF arc(c.x() - rad, c.y() - rad, rad * 2, rad * 2);
+            p.drawArc(arc, 70 * 16, 280 * 16);
+            p.setPen(Qt::NoPen);
+            p.setBrush(ink);
+            const QPointF tip(c.x() + rad * qCos(qDegreesToRadians(70.0)),
+                              c.y() - rad * qSin(qDegreesToRadians(70.0)));
+            QPainterPath head;
+            head.moveTo(tip.x() - thick * 1.5, tip.y() - thick * 0.2);
+            head.lineTo(tip.x() + thick * 1.5, tip.y() - thick * 0.2);
+            head.lineTo(tip.x(), tip.y() + thick * 1.9);
+            head.closeSubpath();
+            p.drawPath(head);
+            break;
+        }
+        case Contrast: {
+            // Half-filled circle: the usual mark for swapping light and dark.
+            const qreal rad = s * 0.5;
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(ink, qMax(1.2, s * 0.11)));
+            p.drawEllipse(c, rad, rad);
+            p.setPen(Qt::NoPen);
+            p.setBrush(ink);
+            QPainterPath half;
+            half.moveTo(c.x(), c.y() - rad);
+            half.arcTo(QRectF(c.x() - rad, c.y() - rad, rad * 2, rad * 2), 90, 180);
+            half.closeSubpath();
+            p.drawPath(half);
+            break;
+        }
+        }
+    }
+
+private:
+    Kind kind;
+    bool chrome = true;
+    QColor page = Qt::black, ink = Qt::white;
+};
+
+// A hairline that fills as the timer runs. Hidden when nothing is counting.
+class ProgressLine : public QWidget
+{
+public:
+    explicit ProgressLine(QWidget *parent = nullptr) : QWidget(parent) {}
+
+    void setColors(const QColor &p, const QColor &i, const QColor &a)
+    {
+        page = p;
+        ink = i;
+        accent = a;
+        update();
+    }
+    void setFraction(qreal f)
+    {
+        fraction = qBound(0.0, f, 1.0);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const qreal r = height() / 2.0;
+        p.setPen(Qt::NoPen);
+        p.setBrush(mix(page, ink, 0.12));
+        p.drawRoundedRect(rect(), r, r);
+        if (fraction <= 0.0)
+            return;
+        p.setBrush(accent);
+        p.drawRoundedRect(QRectF(0, 0, width() * fraction, height()), r, r);
+    }
+
+private:
+    qreal fraction = 0.0;
+    QColor page = Qt::black, ink = Qt::white, accent = Qt::white;
+};
+
 class Omatimer : public QWidget
 {
 public:
@@ -71,46 +248,41 @@ public:
         setWindowTitle("Omatimer");
         setMinimumSize(280, 220);
         resize(800, 600);
-
         setObjectName("root");
 
+        const QString family = uiFontFamily();
+
         conversions = new QLabel("0.0min = 0.00hr");
-        background = new QPushButton(QString::fromUtf8("☀"));
-        background->setFlat(true);
-        background->setCursor(Qt::PointingHandCursor);
-        background->setFocusPolicy(Qt::NoFocus);
+        conversions->setAlignment(Qt::AlignCenter);
+
+        contrast = new IconButton(IconButton::Contrast);
+        contrast->setChrome(false);
 
         input = new QLineEdit;
         input->setPlaceholderText("60s");
         input->setAlignment(Qt::AlignCenter);
-        QFont big = input->font();
-        big.setFamily("monospace");
-        input->setFont(big);
         input->setFrame(false);
-        // Shortcut keys would otherwise be typed into the box instead of
-        // reaching keyPressEvent, which is why Space/R/B never worked.
+        QFont mono(family);
+        input->setFont(mono);
         input->installEventFilter(this);
 
-        started = new QLabel("Started: --:--:--");
-        ends = new QLabel("Ends at: --:--:--");
-        started->setAlignment(Qt::AlignCenter);
-        ends->setAlignment(Qt::AlignCenter);
+        progress = new ProgressLine;
 
-        playPause = new QPushButton(QString::fromUtf8("▶"));
-        reset = new QPushButton(QString::fromUtf8("↺"));
-        for (QPushButton *b : {playPause, reset}) {
-            QFont f = b->font();
-            f.setPointSize(28);
-            b->setFont(f);
-            b->setFlat(true);
-            b->setCursor(Qt::PointingHandCursor);
-            b->setFocusPolicy(Qt::NoFocus);
-        }
+        // One line instead of two: less furniture around the number.
+        schedule = new QLabel(idleSchedule());
+        schedule->setAlignment(Qt::AlignCenter);
+
+        playPause = new IconButton(IconButton::Play);
+        reset = new IconButton(IconButton::Reset);
+
+        for (QWidget *w : {static_cast<QWidget *>(conversions),
+                           static_cast<QWidget *>(schedule)})
+            w->setFont(QFont(family));
 
         auto *top = new QHBoxLayout;
         top->addStretch();
         top->addWidget(conversions);
-        top->addWidget(background);
+        top->addWidget(contrast);
         top->addStretch();
 
         auto *buttons = new QHBoxLayout;
@@ -119,33 +291,37 @@ public:
         buttons->addWidget(reset);
         buttons->addStretch();
 
+        auto *bar = new QHBoxLayout;
+        bar->addStretch(1);
+        bar->addWidget(progress, 6);
+        bar->addStretch(1);
+
         auto *root = new QVBoxLayout(this);
-        root->addStretch(2);
+        root->addStretch(3);
         root->addLayout(top);
         root->addWidget(input);
-        root->addWidget(started);
-        root->addWidget(ends);
+        root->addLayout(bar);
+        root->addWidget(schedule);
         root->addLayout(buttons);
-        root->addStretch(2);
+        root->addStretch(3);
 
         ticker = new QTimer(this);
         ticker->setInterval(1000);
         ticker->setTimerType(Qt::PreciseTimer);
         connect(ticker, &QTimer::timeout, this, &Omatimer::tick);
 
-        connect(playPause, &QPushButton::clicked, this, [this] {
+        connect(playPause, &QAbstractButton::clicked, this, [this] {
             play(kBellSound);
             startOrStop();
         });
-        connect(reset, &QPushButton::clicked, this, [this] {
+        connect(reset, &QAbstractButton::clicked, this, [this] {
             play(kBellSound);
             resetTimer();
         });
-        connect(background, &QPushButton::clicked, this, [this] { cycleBackground(); });
+        connect(contrast, &QAbstractButton::clicked, this, [this] { swapBackground(); });
 
-        // Unlike the Electron build, preferences survive a restart.
         QSettings s;
-        theme = s.value("theme", 0).toInt() % kThemeCount;
+        theme = s.value("theme", 0).toInt() % 2;
         savedSeconds = s.value("savedSeconds", 60).toInt();
         loadOmarchyColors();
 
@@ -156,9 +332,9 @@ public:
             loadOmarchyColors();
             applyTheme();
             if (!watcher->files().contains(f))
-                watcher->addPath(f); // the file is replaced, not edited in place
+                watcher->addPath(f); // themes replace the file, not edit it
         });
-        activeSeconds = savedSeconds;
+
         applyTheme();
         if (!preset.isEmpty()) {
             const int seconds = parseDurationToSeconds(preset);
@@ -167,11 +343,11 @@ public:
                 activeSeconds = seconds;
             }
         }
+        activeSeconds = savedSeconds;
         input->setText(QString::number(savedSeconds));
         updateConversions();
         input->setFocus();
 
-        // `omatimer 25m --start` starts counting without a keypress.
         if (autostart)
             QTimer::singleShot(0, this, [this] { startOrStop(); });
     }
@@ -194,7 +370,7 @@ protected:
     }
 
     // A plain QWidget subclass ignores a stylesheet background unless it
-    // draws PE_Widget itself, which is why every theme rendered clear.
+    // draws PE_Widget itself.
     void paintEvent(QPaintEvent *) override
     {
         QStyleOption opt;
@@ -208,31 +384,27 @@ protected:
     void resizeEvent(QResizeEvent *event) override
     {
         const qreal u = qMin(width() / 34.0, height() / 22.0);
+        const QString family = uiFontFamily();
 
-        QFont small = font();
-        small.setPointSizeF(qBound(8.0, u, 40.0));
-        for (QWidget *w : {static_cast<QWidget *>(conversions),
-                           static_cast<QWidget *>(started),
-                           static_cast<QWidget *>(ends),
-                           static_cast<QWidget *>(background)})
-            w->setFont(small);
+        QFont small(family);
+        small.setPointSizeF(qBound(8.0, u * 0.95, 34.0));
+        conversions->setFont(small);
+        schedule->setFont(small);
 
-        QFont big = input->font();
+        QFont big(family);
         big.setPointSizeF(qBound(20.0, u * 4.2, 220.0));
         input->setFont(big);
 
-        QFont b = font();
-        b.setPointSizeF(qBound(16.0, u * 2.6, 130.0));
-        playPause->setFont(b);
-        this->reset->setFont(b);
+        const int hit = qRound(qBound(40.0, u * 3.6, 150.0));
+        playPause->setFixedSize(hit, hit);
+        reset->setFixedSize(hit, hit);
+        const int mark = qRound(qBound(18.0, u * 1.6, 60.0));
+        contrast->setFixedSize(mark, mark);
 
-        // Buttons get a real hit area instead of hugging the glyph.
-        const int hit = qRound(u * 4.0);
-        playPause->setMinimumSize(hit, hit);
-        this->reset->setMinimumSize(hit, hit);
+        progress->setFixedHeight(qRound(qBound(3.0, u * 0.22, 10.0)));
 
         if (auto *l = qobject_cast<QVBoxLayout *>(layout()))
-            l->setSpacing(qRound(u * 0.5));
+            l->setSpacing(qRound(u * 0.7));
 
         QWidget::resizeEvent(event);
     }
@@ -246,13 +418,11 @@ protected:
     }
 
 private:
-    static const int kThemeCount = 3;
+    static QString idleSchedule() { return QStringLiteral("--:--:--  ·  --:--:--"); }
 
     // Returns true when the key was a shortcut and should not become text.
     bool handleShortcut(QKeyEvent *event)
     {
-        // Digits, '.', and h/m/s belong to the duration box, so anything that
-        // could be typed there is only a shortcut with a modifier.
         switch (event->key()) {
         case Qt::Key_Return:
         case Qt::Key_Enter:
@@ -265,12 +435,13 @@ private:
             resetTimer();
             return true;
         case Qt::Key_B:
-            cycleBackground();
+            swapBackground();
             return true;
         case Qt::Key_M:
             if (!(event->modifiers() & Qt::ControlModifier))
                 return false; // plain "m" is part of "25m"
-            setMuted(!muted);
+            muted = !muted;
+            setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
             return true;
         case Qt::Key_Escape:
             close();
@@ -283,8 +454,7 @@ private:
     void startOrStop()
     {
         running = !running;
-        playPause->setText(running ? QString::fromUtf8("⏸")
-                                   : QString::fromUtf8("▶"));
+        playPause->setKind(running ? IconButton::Pause : IconButton::Play);
         if (!running) {
             ticker->stop();
             return;
@@ -301,11 +471,13 @@ private:
             }
         }
 
+        runSeconds = activeSeconds;
         deadline = QDateTime::currentDateTime().addSecs(activeSeconds);
-        started->setText("Started: " + clockString(QDateTime::currentDateTime()));
-        ends->setText("Ends at: " + clockString(deadline));
+        schedule->setText(clockString(QDateTime::currentDateTime()) + "  ·  "
+                          + clockString(deadline));
         input->setText(QString::number(activeSeconds));
         updateConversions();
+        progress->setFraction(0.0);
         ticker->start();
     }
 
@@ -319,13 +491,15 @@ private:
 
         input->setText(QString::number(activeSeconds));
         updateConversions();
-        ends->setText("Ends at: " + clockString(deadline));
+        if (runSeconds > 0)
+            progress->setFraction(1.0 - qreal(activeSeconds) / runSeconds);
 
         if (activeSeconds <= 0) {
             ticker->stop();
             running = false;
-            playPause->setText(QString::fromUtf8("▶"));
-            ends->setText(QString::number(savedSeconds) + "sec: done!");
+            playPause->setKind(IconButton::Play);
+            progress->setFraction(1.0);
+            schedule->setText(QString("done  ·  %1s").arg(savedSeconds));
             input->setText(QString::number(savedSeconds));
             play(kCompleteSound);
         }
@@ -335,11 +509,11 @@ private:
     {
         ticker->stop();
         running = false;
-        playPause->setText(QString::fromUtf8("▶"));
+        playPause->setKind(IconButton::Play);
         activeSeconds = savedSeconds;
         input->setText(QString::number(savedSeconds));
-        started->setText("Started: --:--:--");
-        ends->setText("Ends at: --:--:--");
+        schedule->setText(idleSchedule());
+        progress->setFraction(0.0);
         updateConversions();
     }
 
@@ -350,15 +524,9 @@ private:
                                  .arg(activeSeconds / 3600.0, 0, 'f', 2));
     }
 
-    void setMuted(bool value)
+    void swapBackground()
     {
-        muted = value;
-        setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
-    }
-
-    void cycleBackground()
-    {
-        theme = (theme + 1) % kThemeCount;
+        theme = 1 - theme;
         applyTheme();
     }
 
@@ -367,48 +535,57 @@ private:
         return QDir::homePath() + "/.local/state/omarchy/current/theme/colors.toml";
     }
 
-    // Same source omacalc and omawrite read, so all three match the desktop.
+    // Same file omacalc and omawrite read, so all three match the desktop.
     void loadOmarchyColors()
     {
-        // Sensible defaults if Omarchy isn't installed or the theme is missing.
-        themeBg[0] = "#1a1a1a";
-        themeBg[1] = "#0e0e0e";
-        themeBg[2] = "#2b2b2b";
-        themeFg = "#cccccc";
+        QColor bg("#1a1a1a"), fg("#cccccc"), light("#e8e8e8");
+        accent = QColor("#7aa2f7");
 
         QFile f(omarchyColorsPath());
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-            return;
-
-        static const QRegularExpression entry(
-            "^\\s*(\\w+)\\s*=\\s*\"(#[0-9a-fA-F]{6})\"");
-        QHash<QString, QString> c;
-        while (!f.atEnd()) {
-            const auto m = entry.match(QString::fromUtf8(f.readLine()));
-            if (m.hasMatch())
-                c.insert(m.captured(1), m.captured(2));
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            static const QRegularExpression entry(
+                "^\\s*(\\w+)\\s*=\\s*\"(#[0-9a-fA-F]{6})\"");
+            QHash<QString, QString> c;
+            while (!f.atEnd()) {
+                const auto m = entry.match(QString::fromUtf8(f.readLine()));
+                if (m.hasMatch())
+                    c.insert(m.captured(1), m.captured(2));
+            }
+            if (c.contains("background")) {
+                bg = QColor(c.value("background"));
+                fg = QColor(c.value("foreground", fg.name()));
+                light = QColor(c.value("bright_foreground",
+                                       c.value("light_foreground", fg.name())));
+                accent = QColor(c.value("accent", accent.name()));
+            }
         }
 
-        const QString bg = c.value("background");
-        if (bg.isEmpty())
-            return;
-        themeBg[0] = bg;
-        themeBg[1] = c.value("darker_background", c.value("dark_background", bg));
-        themeBg[2] = c.value("lighter_background", bg);
-        themeFg = c.value("foreground", themeFg);
+        // The theme gives one pair; the other is it turned inside out. Sort by
+        // lightness so index 0 is always the dark one whichever mode we're in.
+        QPair<QColor, QColor> a(bg, fg), b(light, bg);
+        if (a.first.lightnessF() > b.first.lightnessF())
+            qSwap(a, b);
+        pages[0] = a.first;
+        inks[0] = a.second;
+        pages[1] = b.first;
+        inks[1] = b.second;
     }
 
     void applyTheme()
     {
-        // Shade blocks, which monospace fonts reliably have.
-        static const char *icons[] = {"▒", "▓", "░"};
-        background->setText(QString::fromUtf8(icons[theme]));
-        // Opaque, like omacalc and omawrite: the compositor owns transparency,
-        // so Omarchy's Super+Alt+Backspace toggle still applies to this window.
+        const QColor page = pages[theme], ink = inks[theme];
+        for (IconButton *b : {playPause, reset, contrast})
+            b->setColors(page, ink);
+        progress->setColors(page, ink, accent);
+
+        // Secondary text sits back from the number instead of competing.
+        const QColor quiet = mix(page, ink, 0.55);
         setStyleSheet(QString("#root { background: %1; }"
-                              "QLabel, QLineEdit, QPushButton {"
-                              "  background: transparent; color: %2; border: none; }")
-                          .arg(themeBg[theme], themeFg));
+                              "QLineEdit { background: transparent; color: %2;"
+                              "  border: none; selection-background-color: %3;"
+                              "  selection-color: %1; }"
+                              "QLabel { background: transparent; color: %4; }")
+                          .arg(page.name(), ink.name(), accent.name(), quiet.name()));
     }
 
     // Qt Multimedia would drag in FFmpeg, VA-API and GTK just to play a
@@ -425,14 +602,15 @@ private:
             QProcess::startDetached(player, {path});
     }
 
-    QLabel *conversions, *started, *ends;
+    QLabel *conversions, *schedule;
     QLineEdit *input;
-    QPushButton *playPause, *reset, *background;
+    IconButton *playPause, *reset, *contrast;
+    ProgressLine *progress;
     QTimer *ticker;
-    QDateTime deadline;
-    int activeSeconds = 60, savedSeconds = 60, theme = 0;
     QFileSystemWatcher *watcher = nullptr;
-    QString themeBg[kThemeCount], themeFg;
+    QDateTime deadline;
+    QColor pages[2], inks[2], accent;
+    int activeSeconds = 60, savedSeconds = 60, runSeconds = 60, theme = 0;
     bool running = false, muted = false;
 };
 
