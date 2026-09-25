@@ -26,15 +26,24 @@ Durations accept plain seconds (`90`) or units (`1h 30m 10s`, `1.5m`).
 |-----|--------|
 | Enter / Space | start or stop |
 | R | reset to the saved duration |
-| M | mute |
 | B | cycle background (dark / light / black) |
+| `[` / `]` (or `-` / `+`) | less / more transparent, in 10% steps |
+| `\` | toggle between opaque and 75% |
+| Ctrl+M | mute |
 | Esc | quit |
+
+Shortcuts are case-insensitive and work while the duration box has focus;
+`h`, `m`, `s`, digits and `.` still type normally, which is why mute moved to
+Ctrl+M (a plain `m` is part of `25m`).
+
+Transparency needs a compositor that blends window alpha (Hyprland does).
+The level persists across restarts along with the background and duration.
 
 ## Differences from the Electron version
 
 - Countdown runs against a wall-clock deadline, so a slow or blocked tick
   can't make the timer drift.
-- Background choice and last duration persist across restarts
+- Background choice, transparency, and last duration persist across restarts
   (`~/.config/omarchy/omatimer.conf`), which was an open TODO in papertimer.
 - Font size scales with the window instead of via CSS media queries.
 - Sounds come from `/usr/share/sounds/freedesktop/stereo/`, so no bundled
