@@ -27,9 +27,7 @@ Durations accept plain seconds (`90`) or units (`1h 30m 10s`, `1.5m`).
 |-----|--------|
 | Enter / Space | start or stop |
 | R | reset to the saved duration |
-| B | cycle background (dark / light / glass) |
-| `[` / `]` (or `-` / `+`) | less / more transparent, in 10% steps |
-| `\` | toggle glass on/off |
+| B | cycle the background shade |
 | Ctrl+M | mute |
 | Esc | quit |
 
@@ -37,26 +35,27 @@ Shortcuts are case-insensitive and work while the duration box has focus;
 `h`, `m`, `s`, digits and `.` still type normally, which is why mute moved to
 Ctrl+M (a plain `m` is part of `25m`).
 
-Only the third background ("glass") is see-through; dark and light are solid
-panels. Reaching for `[` / `]` switches to glass, and `\` flips between glass
-and whichever solid background you were on. The level persists across restarts.
+## Colors
 
-Transparency needs a compositor that blends window alpha (Hyprland does).
-Omarchy dims every window to `0.985/0.96` by default, which would multiply
-against the app's own alpha, so this rule in `~/.config/hypr/hyprland.lua`
-hands omatimer control of its own transparency:
+Colors come from the current Omarchy theme
+(`~/.local/state/omarchy/current/theme/colors.toml`), the same file omacalc
+and omawrite read, and re-tint live when you switch themes. `B` cycles the
+background between the theme's normal, darker, and lighter shades.
 
-```lua
-o.window("omatimer", { tag = "-default-opacity", opacity = "1 1" })
-```
+The window is painted opaque and carries Omarchy's `default-opacity` tag, so
+transparency is the compositor's job and Super+Alt+Backspace toggles this
+window along with everything else. An earlier version did its own alpha and
+opted out of that tag; it looked out of place next to its siblings.
 
 ## Differences from the Electron version
 
 - Countdown runs against a wall-clock deadline, so a slow or blocked tick
   can't make the timer drift.
-- Background choice, transparency, and last duration persist across restarts
+- Background choice and last duration persist across restarts
   (`~/.config/omarchy/omatimer.conf`), which was an open TODO in papertimer.
-- Font size scales with the window instead of via CSS media queries.
+- Font size scales with the window instead of via CSS media queries. One
+  unit derived from both width and height drives every size, so the layout
+  holds its proportions in a short-wide or tall-narrow window.
 - Sounds come from `/usr/share/sounds/freedesktop/stereo/`, so no bundled
   audio files. They're handed to `pw-play` (falling back to `paplay`) rather
   than Qt Multimedia, which would load FFmpeg, the VA-API video driver, GTK3
