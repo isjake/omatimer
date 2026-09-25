@@ -316,7 +316,7 @@ public:
         root->addStretch(3);
 
         ticker = new QTimer(this);
-        ticker->setInterval(1000);
+        ticker->setSingleShot(true);
         ticker->setTimerType(Qt::PreciseTimer);
         connect(ticker, &QTimer::timeout, this, &Omatimer::tick);
 
@@ -406,7 +406,7 @@ protected:
         schedule->setFont(small);
 
         bigCap = qBound(20.0, u * 4.2, 220.0);
-        fitInput();
+        fitInput(true); // the window changed size, so re-measure regardless
 
         const int hit = qRound(qBound(40.0, u * 3.6, 150.0));
         playPause->setFixedSize(hit, hit);
@@ -435,12 +435,19 @@ protected:
 private:
     // "1h5m30s" is several times wider than "60", so the display shrinks to
     // fit rather than clipping the tail off the duration.
-    void fitInput()
+    void fitInput(bool force = false)
     {
-        const QString family = uiFontFamily();
-        const qreal avail = qMax(1, input->width() - 16);
         const QString text = input->text().isEmpty() ? input->placeholderText()
                                                      : input->text();
+        // "1m57s" -> "1m56s" is the same width, and re-measuring then
+        // re-setting a 100pt font every second relaid out the whole window
+        // for nothing. Only a change in length can change the fit.
+        if (!force && text.length() == fittedLength)
+            return;
+        fittedLength = text.length();
+
+        const QString family = uiFontFamily();
+        const qreal avail = qMax(1, input->width() - 16);
         qreal size = bigCap;
         QFont f(family);
         f.setPointSizeF(size);
@@ -511,16 +518,33 @@ private:
                           + clockString(deadline));
         input->setText(formatDuration(activeSeconds));
         progress->setFraction(0.0);
-        ticker->start();
+        scheduleTick();
+    }
+
+    // Wake exactly when the displayed figure is due to change, rather than
+    // every 1000ms from whenever the timer happened to start. A fixed
+    // interval drifts off the second boundary, and once it does the display
+    // shows the same figure twice or skips one entirely.
+    void scheduleTick()
+    {
+        const qint64 ms = QDateTime::currentDateTime().msecsTo(deadline);
+        if (ms <= 0) {
+            tick();
+            return;
+        }
+        // The figure is a ceiling, so it changes as the remainder hits zero.
+        int delay = static_cast<int>(ms % 1000);
+        if (delay == 0)
+            delay = 1000;
+        ticker->start(delay + 4); // a hair past the boundary, never before it
     }
 
     // Count down against a wall-clock deadline so a slow tick can't drift.
     void tick()
     {
-        activeSeconds = static_cast<int>(
-            QDateTime::currentDateTime().secsTo(deadline));
-        if (activeSeconds < 0)
-            activeSeconds = 0;
+        const qint64 ms = QDateTime::currentDateTime().msecsTo(deadline);
+        // Ceiling: a timer reads 1s until the moment it is actually up.
+        activeSeconds = ms > 0 ? static_cast<int>((ms + 999) / 1000) : 0;
 
         input->setText(formatDuration(activeSeconds));
         if (runSeconds > 0)
@@ -534,7 +558,9 @@ private:
             schedule->setText(QString("done  ·  %1").arg(formatDuration(savedSeconds)));
             input->setText(formatDuration(savedSeconds));
             play(kCompleteSound);
+            return;
         }
+        scheduleTick();
     }
 
     void resetTimer()
@@ -640,6 +666,7 @@ private:
     QDateTime deadline;
     QColor pages[2], inks[2], accent;
     qreal bigCap = 60.0;
+    int fittedLength = -1;
     int activeSeconds = 60, savedSeconds = 60, runSeconds = 60, theme = 0;
     bool running = false, muted = false;
     bool themeIsLight = false, overridden = false;
