@@ -4,7 +4,8 @@ A native Qt6 rewrite of papertimer. One binary, no runtime, no browser.
 
 ## Build
 
-Needs `qt6-base` and `qt6-multimedia` (already installed on this machine).
+Needs `qt6-base`. Sounds use `pw-play` from `pipewire` (or `paplay`);
+without either the timer runs silently.
 
 ```sh
 qmake6 omatimer.pro -o Makefile
@@ -57,7 +58,10 @@ o.window("omatimer", { tag = "-default-opacity", opacity = "1 1" })
   (`~/.config/omarchy/omatimer.conf`), which was an open TODO in papertimer.
 - Font size scales with the window instead of via CSS media queries.
 - Sounds come from `/usr/share/sounds/freedesktop/stereo/`, so no bundled
-  audio files.
+  audio files. They're handed to `pw-play` (falling back to `paplay`) rather
+  than Qt Multimedia, which would load FFmpeg, the VA-API video driver, GTK3
+  and Qt Quick just to play a one-second chime — about 24 MB of PSS and a
+  pile of VDPAU warnings on every launch.
 
 ## Measured against the Electron build
 
@@ -67,8 +71,8 @@ Both apps open, same machine (7.8 GB RAM), idle timer unless noted.
 |---|---|---|
 | Processes | 7 | 1 |
 | Threads | 74 | 12 |
-| RAM (PSS) | 242 MB | 52 MB |
-| RAM (RSS) | 583 MB | 102 MB |
+| RAM (PSS) | 242 MB | 41 MB |
+| RAM (RSS) | 583 MB | 76 MB |
 | CPU, idle | 1.30% | 0.05% |
 | CPU, timer running | 0.83% | 0.43% |
 | Install size | 446 MB | 60 KB binary |
