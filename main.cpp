@@ -1,6 +1,6 @@
 // omatimer - a native Qt6 rewrite of papertimer.
-// Same behaviour as the Electron version: type a duration, hit Enter/Space to
-// start or stop, R to reset, M to mute, B to cycle the background.
+// Type a duration, hit Enter/Space to start or stop, R to reset, B to cycle
+// the background, [ / ] to change transparency, Ctrl+M to mute.
 
 #include <QApplication>
 #include <QWidget>
@@ -65,6 +65,11 @@ public:
         setMinimumSize(280, 220);
         resize(800, 600);
 
+        // The window paints its own translucent panel, so the compositor has
+        // to hand us a surface with an alpha channel.
+        setObjectName("root");
+        setAttribute(Qt::WA_TranslucentBackground, true);
+
         conversions = new QLabel("0.0min = 0.00hr");
         background = new QPushButton(QString::fromUtf8("☀"));
         background->setFlat(true);
@@ -78,6 +83,9 @@ public:
         big.setFamily("monospace");
         input->setFont(big);
         input->setFrame(false);
+        // Shortcut keys would otherwise be typed into the box instead of
+        // reaching keyPressEvent, which is why Space/R/B never worked.
+        input->installEventFilter(this);
 
         started = new QLabel("Started: --:--:--");
         ends = new QLabel("Ends at: --:--:--");
@@ -139,6 +147,7 @@ public:
         // Unlike the Electron build, preferences survive a restart.
         QSettings s;
         theme = s.value("theme", 0).toInt();
+        opacity = qBound(kMinOpacity, s.value("opacity", 100).toInt(), 100);
         savedSeconds = s.value("savedSeconds", 60).toInt();
         activeSeconds = savedSeconds;
         applyTheme();
@@ -161,29 +170,18 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override
     {
-        switch (event->key()) {
-        case Qt::Key_Return:
-        case Qt::Key_Enter:
-        case Qt::Key_Space:
-            play(kBellSound);
-            startOrStop();
-            return;
-        case Qt::Key_R:
-            play(kBellSound);
-            resetTimer();
-            return;
-        case Qt::Key_M:
-            muted = !muted;
-            return;
-        case Qt::Key_B:
-            cycleBackground();
-            return;
-        case Qt::Key_Escape:
-            close();
-            return;
-        default:
+        if (!handleShortcut(event))
             QWidget::keyPressEvent(event);
-        }
+    }
+
+    // The duration box keeps the focus, so shortcuts are pulled out of its
+    // key stream before it turns them into text.
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == input && event->type() == QEvent::KeyPress
+            && handleShortcut(static_cast<QKeyEvent *>(event)))
+            return true;
+        return QWidget::eventFilter(watched, event);
     }
 
     // Type scales with the window, the way the CSS media queries did.
@@ -214,11 +212,58 @@ protected:
     {
         QSettings s;
         s.setValue("theme", theme);
+        s.setValue("opacity", opacity);
         s.setValue("savedSeconds", savedSeconds);
         QWidget::closeEvent(event);
     }
 
 private:
+    static const int kMinOpacity = 20;
+
+    // Returns true when the key was a shortcut and should not become text.
+    bool handleShortcut(QKeyEvent *event)
+    {
+        // Digits, '.', and h/m/s belong to the duration box, so anything that
+        // could be typed there is only a shortcut with a modifier.
+        switch (event->key()) {
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+        case Qt::Key_Space:
+            play(kBellSound);
+            startOrStop();
+            return true;
+        case Qt::Key_R:
+            play(kBellSound);
+            resetTimer();
+            return true;
+        case Qt::Key_B:
+            cycleBackground();
+            return true;
+        case Qt::Key_M:
+            if (!(event->modifiers() & Qt::ControlModifier))
+                return false; // plain "m" is part of "25m"
+            setMuted(!muted);
+            return true;
+        case Qt::Key_BracketLeft:
+        case Qt::Key_Minus:
+            setOpacity(opacity - 10);
+            return true;
+        case Qt::Key_BracketRight:
+        case Qt::Key_Plus:
+        case Qt::Key_Equal:
+            setOpacity(opacity + 10);
+            return true;
+        case Qt::Key_Backslash:
+            setOpacity(opacity == 100 ? 75 : 100);
+            return true;
+        case Qt::Key_Escape:
+            close();
+            return true;
+        default:
+            return false;
+        }
+    }
+
     void startOrStop()
     {
         running = !running;
@@ -289,9 +334,21 @@ private:
                                  .arg(activeSeconds / 3600.0, 0, 'f', 2));
     }
 
+    void setMuted(bool value)
+    {
+        muted = value;
+        setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
+    }
+
     void cycleBackground()
     {
         theme = (theme + 1) % 3;
+        applyTheme();
+    }
+
+    void setOpacity(int percent)
+    {
+        opacity = qBound(kMinOpacity, percent, 100);
         applyTheme();
     }
 
@@ -299,16 +356,23 @@ private:
     {
         static const char *icons[] = {"☀", "☾", "○"};
         background->setText(QString::fromUtf8(icons[theme]));
-        QString fg, bg;
+        QString fg;
+        int r, g, b;
         switch (theme) {
-        case 0: bg = "#2a2a2a"; fg = "#cccccc"; break;  // dark
-        case 1: bg = "#ffffff"; fg = "#1a1a1a"; break;  // light
-        default: bg = "#000000"; fg = "#ffffff"; break; // high contrast
+        case 0: r = g = b = 0x2a; fg = "#cccccc"; break;  // dark
+        case 1: r = g = b = 0xff; fg = "#1a1a1a"; break;  // light
+        default: r = g = b = 0x00; fg = "#ffffff"; break; // high contrast
         }
-        setStyleSheet(QString("QWidget { background: %1; color: %2; }"
-                              "QLineEdit { background: %1; color: %2; border: none; }"
-                              "QPushButton { background: %1; color: %2; border: none; }")
-                          .arg(bg, fg));
+        // Only the root paints a background; children stay transparent so the
+        // alpha isn't stacked layer on layer.
+        setStyleSheet(QString("#root { background: rgba(%1, %2, %3, %4); }"
+                              "QLabel, QLineEdit, QPushButton {"
+                              "  background: transparent; color: %5; border: none; }")
+                          .arg(r)
+                          .arg(g)
+                          .arg(b)
+                          .arg(opacity / 100.0, 0, 'f', 3)
+                          .arg(fg));
     }
 
     void play(const QString &path)
@@ -326,7 +390,7 @@ private:
     QMediaPlayer *player;
     QAudioOutput *audio;
     QDateTime deadline;
-    int activeSeconds = 60, savedSeconds = 60, theme = 0;
+    int activeSeconds = 60, savedSeconds = 60, theme = 0, opacity = 100;
     bool running = false, muted = false;
 };
 
