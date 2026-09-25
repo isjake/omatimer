@@ -20,6 +20,7 @@
 #include <QHash>
 #include <QFont>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
@@ -78,6 +79,21 @@ static int parseDurationToSeconds(const QString &input)
         else total += value;
     }
     return static_cast<int>(total);
+}
+
+// 90 -> "1m30s", 3661 -> "1h1m1s", 45 -> "45s". Round-trips back through
+// parseDurationToSeconds, so the box stays editable in its own notation.
+static QString formatDuration(int seconds)
+{
+    if (seconds < 60)
+        return QString::number(seconds) + "s";
+
+    const int h = seconds / 3600, m = (seconds % 3600) / 60, s = seconds % 60;
+    QString out;
+    if (h) out += QString::number(h) + "h";
+    if (m) out += QString::number(m) + "m";
+    if (s) out += QString::number(s) + "s";
+    return out;
 }
 
 static QString clockString(const QDateTime &t)
@@ -252,9 +268,6 @@ public:
 
         const QString family = uiFontFamily();
 
-        conversions = new QLabel("0.0min = 0.00hr");
-        conversions->setAlignment(Qt::AlignCenter);
-
         contrast = new IconButton(IconButton::Contrast);
         contrast->setChrome(false);
 
@@ -265,6 +278,7 @@ public:
         QFont mono(family);
         input->setFont(mono);
         input->installEventFilter(this);
+        connect(input, &QLineEdit::textChanged, this, [this] { fitInput(); });
 
         progress = new ProgressLine;
 
@@ -275,21 +289,18 @@ public:
         playPause = new IconButton(IconButton::Play);
         reset = new IconButton(IconButton::Reset);
 
-        for (QWidget *w : {static_cast<QWidget *>(conversions),
-                           static_cast<QWidget *>(schedule)})
-            w->setFont(QFont(family));
+        schedule->setFont(QFont(family));
 
-        auto *top = new QHBoxLayout;
-        top->addStretch();
-        top->addWidget(conversions);
-        top->addWidget(contrast);
-        top->addStretch();
-
+        // A spacer the width of the contrast mark keeps play/reset centred
+        // while the mark sits off to the right.
+        balance = new QWidget;
         auto *buttons = new QHBoxLayout;
+        buttons->addWidget(balance);
         buttons->addStretch();
         buttons->addWidget(playPause);
         buttons->addWidget(reset);
         buttons->addStretch();
+        buttons->addWidget(contrast);
 
         auto *bar = new QHBoxLayout;
         bar->addStretch(1);
@@ -298,7 +309,6 @@ public:
 
         auto *root = new QVBoxLayout(this);
         root->addStretch(3);
-        root->addLayout(top);
         root->addWidget(input);
         root->addLayout(bar);
         root->addWidget(schedule);
@@ -350,8 +360,7 @@ public:
             }
         }
         activeSeconds = savedSeconds;
-        input->setText(QString::number(savedSeconds));
-        updateConversions();
+        input->setText(formatDuration(savedSeconds));
         input->setFocus();
 
         if (autostart)
@@ -394,18 +403,17 @@ protected:
 
         QFont small(family);
         small.setPointSizeF(qBound(8.0, u * 0.95, 34.0));
-        conversions->setFont(small);
         schedule->setFont(small);
 
-        QFont big(family);
-        big.setPointSizeF(qBound(20.0, u * 4.2, 220.0));
-        input->setFont(big);
+        bigCap = qBound(20.0, u * 4.2, 220.0);
+        fitInput();
 
         const int hit = qRound(qBound(40.0, u * 3.6, 150.0));
         playPause->setFixedSize(hit, hit);
         reset->setFixedSize(hit, hit);
         const int mark = qRound(qBound(18.0, u * 1.6, 60.0));
         contrast->setFixedSize(mark, mark);
+        balance->setFixedSize(mark, 1);
 
         progress->setFixedHeight(qRound(qBound(3.0, u * 0.22, 10.0)));
 
@@ -425,6 +433,25 @@ protected:
     }
 
 private:
+    // "1h5m30s" is several times wider than "60", so the display shrinks to
+    // fit rather than clipping the tail off the duration.
+    void fitInput()
+    {
+        const QString family = uiFontFamily();
+        const qreal avail = qMax(1, input->width() - 16);
+        const QString text = input->text().isEmpty() ? input->placeholderText()
+                                                     : input->text();
+        qreal size = bigCap;
+        QFont f(family);
+        f.setPointSizeF(size);
+        const qreal w = QFontMetricsF(f).horizontalAdvance(text);
+        if (w > avail)
+            size = qMax(12.0, size * avail / w);
+        f.setPointSizeF(size);
+        if (input->font().pointSizeF() != size)
+            input->setFont(f);
+    }
+
     static QString idleSchedule() { return QStringLiteral("--:--:--  ·  --:--:--"); }
 
     // Returns true when the key was a shortcut and should not become text.
@@ -482,8 +509,7 @@ private:
         deadline = QDateTime::currentDateTime().addSecs(activeSeconds);
         schedule->setText(clockString(QDateTime::currentDateTime()) + "  ·  "
                           + clockString(deadline));
-        input->setText(QString::number(activeSeconds));
-        updateConversions();
+        input->setText(formatDuration(activeSeconds));
         progress->setFraction(0.0);
         ticker->start();
     }
@@ -496,8 +522,7 @@ private:
         if (activeSeconds < 0)
             activeSeconds = 0;
 
-        input->setText(QString::number(activeSeconds));
-        updateConversions();
+        input->setText(formatDuration(activeSeconds));
         if (runSeconds > 0)
             progress->setFraction(1.0 - qreal(activeSeconds) / runSeconds);
 
@@ -506,8 +531,8 @@ private:
             running = false;
             playPause->setKind(IconButton::Play);
             progress->setFraction(1.0);
-            schedule->setText(QString("done  ·  %1s").arg(savedSeconds));
-            input->setText(QString::number(savedSeconds));
+            schedule->setText(QString("done  ·  %1").arg(formatDuration(savedSeconds)));
+            input->setText(formatDuration(savedSeconds));
             play(kCompleteSound);
         }
     }
@@ -518,17 +543,9 @@ private:
         running = false;
         playPause->setKind(IconButton::Play);
         activeSeconds = savedSeconds;
-        input->setText(QString::number(savedSeconds));
+        input->setText(formatDuration(savedSeconds));
         schedule->setText(idleSchedule());
         progress->setFraction(0.0);
-        updateConversions();
-    }
-
-    void updateConversions()
-    {
-        conversions->setText(QString("%1min = %2hr")
-                                 .arg(activeSeconds / 60.0, 0, 'f', 1)
-                                 .arg(activeSeconds / 3600.0, 0, 'f', 2));
     }
 
     void swapBackground()
@@ -613,7 +630,8 @@ private:
             QProcess::startDetached(player, {path});
     }
 
-    QLabel *conversions, *schedule;
+    QLabel *schedule;
+    QWidget *balance;
     QLineEdit *input;
     IconButton *playPause, *reset, *contrast;
     ProgressLine *progress;
@@ -621,6 +639,7 @@ private:
     QFileSystemWatcher *watcher = nullptr;
     QDateTime deadline;
     QColor pages[2], inks[2], accent;
+    qreal bigCap = 60.0;
     int activeSeconds = 60, savedSeconds = 60, runSeconds = 60, theme = 0;
     bool running = false, muted = false;
     bool themeIsLight = false, overridden = false;
