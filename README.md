@@ -26,9 +26,9 @@ Durations accept plain seconds (`90`) or units (`1h 30m 10s`, `1.5m`).
 |-----|--------|
 | Enter / Space | start or stop |
 | R | reset to the saved duration |
-| B | cycle background (dark / light / black) |
+| B | cycle background (dark / light / glass) |
 | `[` / `]` (or `-` / `+`) | less / more transparent, in 10% steps |
-| `\` | toggle between opaque and 75% |
+| `\` | toggle glass on/off |
 | Ctrl+M | mute |
 | Esc | quit |
 
@@ -36,8 +36,18 @@ Shortcuts are case-insensitive and work while the duration box has focus;
 `h`, `m`, `s`, digits and `.` still type normally, which is why mute moved to
 Ctrl+M (a plain `m` is part of `25m`).
 
+Only the third background ("glass") is see-through; dark and light are solid
+panels. Reaching for `[` / `]` switches to glass, and `\` flips between glass
+and whichever solid background you were on. The level persists across restarts.
+
 Transparency needs a compositor that blends window alpha (Hyprland does).
-The level persists across restarts along with the background and duration.
+Omarchy dims every window to `0.985/0.96` by default, which would multiply
+against the app's own alpha, so this rule in `~/.config/hypr/hyprland.lua`
+hands omatimer control of its own transparency:
+
+```lua
+o.window("omatimer", { tag = "-default-opacity", opacity = "1 1" })
+```
 
 ## Differences from the Electron version
 
