@@ -17,6 +17,10 @@
 #include <QProcess>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QFileSystemWatcher>
+#include <QFile>
+#include <QDir>
+#include <QHash>
 #include <QFont>
 #include <QResizeEvent>
 #include <QPainter>
@@ -68,10 +72,7 @@ public:
         setMinimumSize(280, 220);
         resize(800, 600);
 
-        // The window paints its own translucent panel, so the compositor has
-        // to hand us a surface with an alpha channel.
         setObjectName("root");
-        setAttribute(Qt::WA_TranslucentBackground, true);
 
         conversions = new QLabel("0.0min = 0.00hr");
         background = new QPushButton(QString::fromUtf8("☀"));
@@ -119,13 +120,13 @@ public:
         buttons->addStretch();
 
         auto *root = new QVBoxLayout(this);
-        root->addStretch();
+        root->addStretch(2);
         root->addLayout(top);
         root->addWidget(input);
         root->addWidget(started);
         root->addWidget(ends);
         root->addLayout(buttons);
-        root->addStretch();
+        root->addStretch(2);
 
         ticker = new QTimer(this);
         ticker->setInterval(1000);
@@ -144,10 +145,19 @@ public:
 
         // Unlike the Electron build, preferences survive a restart.
         QSettings s;
-        theme = s.value("theme", 0).toInt();
-        opacity = qBound(kMinOpacity, s.value("opacity", 75).toInt(), 100);
-        solidTheme = (theme == kGlassTheme) ? 0 : theme;
+        theme = s.value("theme", 0).toInt() % kThemeCount;
         savedSeconds = s.value("savedSeconds", 60).toInt();
+        loadOmarchyColors();
+
+        // Re-tint live when the Omarchy theme changes, the way omacalc does.
+        watcher = new QFileSystemWatcher(this);
+        watcher->addPath(omarchyColorsPath());
+        connect(watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &f) {
+            loadOmarchyColors();
+            applyTheme();
+            if (!watcher->files().contains(f))
+                watcher->addPath(f); // the file is replaced, not edited in place
+        });
         activeSeconds = savedSeconds;
         applyTheme();
         if (!preset.isEmpty()) {
@@ -193,26 +203,36 @@ protected:
         style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
     }
 
-    // Type scales with the window, the way the CSS media queries did.
+    // Everything scales off one unit derived from both dimensions, so the
+    // layout keeps its proportions in a short-wide or tall-narrow window.
     void resizeEvent(QResizeEvent *event) override
     {
-        const int base = qBound(7, height() / 34, 16);
-        QFont f = font();
-        f.setPointSize(base);
+        const qreal u = qMin(width() / 34.0, height() / 22.0);
+
+        QFont small = font();
+        small.setPointSizeF(qBound(8.0, u, 40.0));
         for (QWidget *w : {static_cast<QWidget *>(conversions),
                            static_cast<QWidget *>(started),
                            static_cast<QWidget *>(ends),
                            static_cast<QWidget *>(background)})
-            w->setFont(f);
+            w->setFont(small);
 
         QFont big = input->font();
-        big.setPointSize(qBound(18, height() / 8, 72));
+        big.setPointSizeF(qBound(20.0, u * 4.2, 220.0));
         input->setFont(big);
 
         QFont b = font();
-        b.setPointSize(qBound(12, height() / 18, 34));
+        b.setPointSizeF(qBound(16.0, u * 2.6, 130.0));
         playPause->setFont(b);
         this->reset->setFont(b);
+
+        // Buttons get a real hit area instead of hugging the glyph.
+        const int hit = qRound(u * 4.0);
+        playPause->setMinimumSize(hit, hit);
+        this->reset->setMinimumSize(hit, hit);
+
+        if (auto *l = qobject_cast<QVBoxLayout *>(layout()))
+            l->setSpacing(qRound(u * 0.5));
 
         QWidget::resizeEvent(event);
     }
@@ -221,14 +241,12 @@ protected:
     {
         QSettings s;
         s.setValue("theme", theme);
-        s.setValue("opacity", opacity);
         s.setValue("savedSeconds", savedSeconds);
         QWidget::closeEvent(event);
     }
 
 private:
-    static const int kMinOpacity = 20;
-    static const int kGlassTheme = 2;
+    static const int kThemeCount = 3;
 
     // Returns true when the key was a shortcut and should not become text.
     bool handleShortcut(QKeyEvent *event)
@@ -253,18 +271,6 @@ private:
             if (!(event->modifiers() & Qt::ControlModifier))
                 return false; // plain "m" is part of "25m"
             setMuted(!muted);
-            return true;
-        case Qt::Key_BracketLeft:
-        case Qt::Key_Minus:
-            setOpacity(opacity - 10);
-            return true;
-        case Qt::Key_BracketRight:
-        case Qt::Key_Plus:
-        case Qt::Key_Equal:
-            setOpacity(opacity + 10);
-            return true;
-        case Qt::Key_Backslash:
-            toggleGlass();
             return true;
         case Qt::Key_Escape:
             close();
@@ -352,57 +358,57 @@ private:
 
     void cycleBackground()
     {
-        theme = (theme + 1) % 3;
+        theme = (theme + 1) % kThemeCount;
         applyTheme();
     }
 
-    void setOpacity(int percent)
+    static QString omarchyColorsPath()
     {
-        opacity = qBound(kMinOpacity, percent, 100);
-        theme = kGlassTheme; // reaching for the alpha keys means you want glass
-        applyTheme();
+        return QDir::homePath() + "/.local/state/omarchy/current/theme/colors.toml";
     }
 
-    // Jump to glass and back to whichever solid theme you came from.
-    void toggleGlass()
+    // Same source omacalc and omawrite read, so all three match the desktop.
+    void loadOmarchyColors()
     {
-        if (theme == kGlassTheme) {
-            theme = solidTheme;
-        } else {
-            solidTheme = theme;
-            theme = kGlassTheme;
+        // Sensible defaults if Omarchy isn't installed or the theme is missing.
+        themeBg[0] = "#1a1a1a";
+        themeBg[1] = "#0e0e0e";
+        themeBg[2] = "#2b2b2b";
+        themeFg = "#cccccc";
+
+        QFile f(omarchyColorsPath());
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+            return;
+
+        static const QRegularExpression entry(
+            "^\\s*(\\w+)\\s*=\\s*\"(#[0-9a-fA-F]{6})\"");
+        QHash<QString, QString> c;
+        while (!f.atEnd()) {
+            const auto m = entry.match(QString::fromUtf8(f.readLine()));
+            if (m.hasMatch())
+                c.insert(m.captured(1), m.captured(2));
         }
-        applyTheme();
+
+        const QString bg = c.value("background");
+        if (bg.isEmpty())
+            return;
+        themeBg[0] = bg;
+        themeBg[1] = c.value("darker_background", c.value("dark_background", bg));
+        themeBg[2] = c.value("lighter_background", bg);
+        themeFg = c.value("foreground", themeFg);
     }
 
     void applyTheme()
     {
-        static const char *icons[] = {"☀", "☾", "◌"};
+        // Shade blocks, which monospace fonts reliably have.
+        static const char *icons[] = {"▒", "▓", "░"};
         background->setText(QString::fromUtf8(icons[theme]));
-        QString fg;
-        int r, g, b;
-        // Dark and light are solid panels; only "glass" lets the desktop
-        // through, so the alpha slider belongs to that one theme.
-        int alpha = 100;
-        switch (theme) {
-        case 0: r = g = b = 0x2a; fg = "#cccccc"; break;  // dark
-        case 1: r = g = b = 0xff; fg = "#1a1a1a"; break;  // light
-        default:                                          // glass
-            r = g = b = 0x00;
-            fg = "#ffffff";
-            alpha = opacity;
-            break;
-        }
-        // Only the root paints a background; children stay transparent so the
-        // alpha isn't stacked layer on layer.
-        setStyleSheet(QString("#root { background: rgba(%1, %2, %3, %4); }"
+        // Opaque, like omacalc and omawrite: the compositor owns transparency,
+        // so Omarchy's Super+Alt+Backspace toggle still applies to this window.
+        setStyleSheet(QString("#root { background: %1; }"
                               "QLabel, QLineEdit, QPushButton {"
-                              "  background: transparent; color: %5; border: none; }")
-                          .arg(r)
-                          .arg(g)
-                          .arg(b)
-                          .arg(alpha / 100.0, 0, 'f', 3)
-                          .arg(fg));
+                              "  background: transparent; color: %2; border: none; }")
+                          .arg(themeBg[theme], themeFg));
     }
 
     // Qt Multimedia would drag in FFmpeg, VA-API and GTK just to play a
@@ -424,8 +430,9 @@ private:
     QPushButton *playPause, *reset, *background;
     QTimer *ticker;
     QDateTime deadline;
-    int activeSeconds = 60, savedSeconds = 60, theme = 0, opacity = 75;
-    int solidTheme = 0;
+    int activeSeconds = 60, savedSeconds = 60, theme = 0;
+    QFileSystemWatcher *watcher = nullptr;
+    QString themeBg[kThemeCount], themeFg;
     bool running = false, muted = false;
 };
 
