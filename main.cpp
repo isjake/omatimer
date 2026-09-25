@@ -147,7 +147,8 @@ public:
         // Unlike the Electron build, preferences survive a restart.
         QSettings s;
         theme = s.value("theme", 0).toInt();
-        opacity = qBound(kMinOpacity, s.value("opacity", 100).toInt(), 100);
+        opacity = qBound(kMinOpacity, s.value("opacity", 75).toInt(), 100);
+        solidTheme = (theme == kGlassTheme) ? 0 : theme;
         savedSeconds = s.value("savedSeconds", 60).toInt();
         activeSeconds = savedSeconds;
         applyTheme();
@@ -219,6 +220,7 @@ protected:
 
 private:
     static const int kMinOpacity = 20;
+    static const int kGlassTheme = 2;
 
     // Returns true when the key was a shortcut and should not become text.
     bool handleShortcut(QKeyEvent *event)
@@ -254,7 +256,7 @@ private:
             setOpacity(opacity + 10);
             return true;
         case Qt::Key_Backslash:
-            setOpacity(opacity == 100 ? 75 : 100);
+            toggleGlass();
             return true;
         case Qt::Key_Escape:
             close();
@@ -349,19 +351,39 @@ private:
     void setOpacity(int percent)
     {
         opacity = qBound(kMinOpacity, percent, 100);
+        theme = kGlassTheme; // reaching for the alpha keys means you want glass
+        applyTheme();
+    }
+
+    // Jump to glass and back to whichever solid theme you came from.
+    void toggleGlass()
+    {
+        if (theme == kGlassTheme) {
+            theme = solidTheme;
+        } else {
+            solidTheme = theme;
+            theme = kGlassTheme;
+        }
         applyTheme();
     }
 
     void applyTheme()
     {
-        static const char *icons[] = {"☀", "☾", "○"};
+        static const char *icons[] = {"☀", "☾", "◌"};
         background->setText(QString::fromUtf8(icons[theme]));
         QString fg;
         int r, g, b;
+        // Dark and light are solid panels; only "glass" lets the desktop
+        // through, so the alpha slider belongs to that one theme.
+        int alpha = 100;
         switch (theme) {
         case 0: r = g = b = 0x2a; fg = "#cccccc"; break;  // dark
         case 1: r = g = b = 0xff; fg = "#1a1a1a"; break;  // light
-        default: r = g = b = 0x00; fg = "#ffffff"; break; // high contrast
+        default:                                          // glass
+            r = g = b = 0x00;
+            fg = "#ffffff";
+            alpha = opacity;
+            break;
         }
         // Only the root paints a background; children stay transparent so the
         // alpha isn't stacked layer on layer.
@@ -371,7 +393,7 @@ private:
                           .arg(r)
                           .arg(g)
                           .arg(b)
-                          .arg(opacity / 100.0, 0, 'f', 3)
+                          .arg(alpha / 100.0, 0, 'f', 3)
                           .arg(fg));
     }
 
@@ -390,7 +412,8 @@ private:
     QMediaPlayer *player;
     QAudioOutput *audio;
     QDateTime deadline;
-    int activeSeconds = 60, savedSeconds = 60, theme = 0, opacity = 100;
+    int activeSeconds = 60, savedSeconds = 60, theme = 0, opacity = 75;
+    int solidTheme = 0;
     bool running = false, muted = false;
 };
 
