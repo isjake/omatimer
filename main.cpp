@@ -14,11 +14,14 @@
 #include <QRegularExpression>
 #include <QDateTime>
 #include <QSettings>
-#include <QMediaPlayer>
-#include <QAudioOutput>
+#include <QProcess>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QFont>
 #include <QResizeEvent>
+#include <QPainter>
+#include <QStyle>
+#include <QStyleOption>
 
 static const char *kCompleteSound =
     "/usr/share/sounds/freedesktop/stereo/complete.oga";
@@ -124,11 +127,6 @@ public:
         root->addLayout(buttons);
         root->addStretch();
 
-        // One shared player is enough; the two sounds never overlap.
-        audio = new QAudioOutput(this);
-        player = new QMediaPlayer(this);
-        player->setAudioOutput(audio);
-
         ticker = new QTimer(this);
         ticker->setInterval(1000);
         ticker->setTimerType(Qt::PreciseTimer);
@@ -183,6 +181,16 @@ protected:
             && handleShortcut(static_cast<QKeyEvent *>(event)))
             return true;
         return QWidget::eventFilter(watched, event);
+    }
+
+    // A plain QWidget subclass ignores a stylesheet background unless it
+    // draws PE_Widget itself, which is why every theme rendered clear.
+    void paintEvent(QPaintEvent *) override
+    {
+        QStyleOption opt;
+        opt.initFrom(this);
+        QPainter p(this);
+        style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
     }
 
     // Type scales with the window, the way the CSS media queries did.
@@ -397,20 +405,24 @@ private:
                           .arg(fg));
     }
 
+    // Qt Multimedia would drag in FFmpeg, VA-API and GTK just to play a
+    // one-second chime, so hand the file to PipeWire and forget about it.
     void play(const QString &path)
     {
         if (muted || !QFileInfo::exists(path))
             return;
-        player->setSource(QUrl::fromLocalFile(path));
-        player->play();
+        static const QString player =
+            QStandardPaths::findExecutable("pw-play").isEmpty()
+                ? QStandardPaths::findExecutable("paplay")
+                : QStandardPaths::findExecutable("pw-play");
+        if (!player.isEmpty())
+            QProcess::startDetached(player, {path});
     }
 
     QLabel *conversions, *started, *ends;
     QLineEdit *input;
     QPushButton *playPause, *reset, *background;
     QTimer *ticker;
-    QMediaPlayer *player;
-    QAudioOutput *audio;
     QDateTime deadline;
     int activeSeconds = 60, savedSeconds = 60, theme = 0, opacity = 75;
     int solidTheme = 0;
