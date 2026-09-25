@@ -21,7 +21,10 @@ omatimer 25m          # opens preloaded with 25 minutes
 omatimer 1h30m --start   # opens and starts counting immediately
 ```
 
-Durations accept plain seconds (`90`) or units (`1h 30m 10s`, `1.5m`).
+Durations accept plain seconds (`90`) or units (`1h 30m 10s`, `1.5m`), and
+the display counts down in the same notation — `1h5m30s`, `2m`, `45s` — so
+whatever is on screen can be typed straight back in. Anything under a minute
+shows as plain seconds. The number shrinks to fit when the units make it long.
 
 | Key | Action |
 |-----|--------|
