@@ -321,15 +321,21 @@ public:
         connect(contrast, &QAbstractButton::clicked, this, [this] { swapBackground(); });
 
         QSettings s;
-        theme = s.value("theme", 0).toInt() % 2;
         savedSeconds = s.value("savedSeconds", 60).toInt();
         loadOmarchyColors();
+        overridden = s.value("backgroundOverridden", false).toBool();
+        theme = overridden ? s.value("theme", 0).toInt() % 2
+                           : (themeIsLight ? 1 : 0);
 
         // Re-tint live when the Omarchy theme changes, the way omacalc does.
         watcher = new QFileSystemWatcher(this);
         watcher->addPath(omarchyColorsPath());
         connect(watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &f) {
             loadOmarchyColors();
+            // Picking a new theme is a fresh instruction, so it overrides an
+            // earlier B press rather than being ignored by it.
+            overridden = false;
+            theme = themeIsLight ? 1 : 0;
             applyTheme();
             if (!watcher->files().contains(f))
                 watcher->addPath(f); // themes replace the file, not edit it
@@ -413,6 +419,7 @@ protected:
     {
         QSettings s;
         s.setValue("theme", theme);
+        s.setValue("backgroundOverridden", overridden);
         s.setValue("savedSeconds", savedSeconds);
         QWidget::closeEvent(event);
     }
@@ -527,6 +534,8 @@ private:
     void swapBackground()
     {
         theme = 1 - theme;
+        // Back to following the theme once B lands on what it asked for.
+        overridden = theme != (themeIsLight ? 1 : 0);
         applyTheme();
     }
 
@@ -540,17 +549,19 @@ private:
     {
         QColor bg("#1a1a1a"), fg("#cccccc"), light("#e8e8e8");
         accent = QColor("#7aa2f7");
+        themeIsLight = false;
 
         QFile f(omarchyColorsPath());
         if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
             static const QRegularExpression entry(
-                "^\\s*(\\w+)\\s*=\\s*\"(#[0-9a-fA-F]{6})\"");
+                "^\\s*(\\w+)\\s*=\\s*\"([^\"]+)\"");
             QHash<QString, QString> c;
             while (!f.atEnd()) {
                 const auto m = entry.match(QString::fromUtf8(f.readLine()));
                 if (m.hasMatch())
                     c.insert(m.captured(1), m.captured(2));
             }
+            themeIsLight = c.value("mode").compare("light", Qt::CaseInsensitive) == 0;
             if (c.contains("background")) {
                 bg = QColor(c.value("background"));
                 fg = QColor(c.value("foreground", fg.name()));
@@ -612,6 +623,7 @@ private:
     QColor pages[2], inks[2], accent;
     int activeSeconds = 60, savedSeconds = 60, runSeconds = 60, theme = 0;
     bool running = false, muted = false;
+    bool themeIsLight = false, overridden = false;
 };
 
 int main(int argc, char *argv[])

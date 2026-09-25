@@ -44,6 +44,11 @@ one background/foreground pair and `B` swaps to it turned inside out, so both
 the dark and the light background stay in the theme's palette rather than
 falling back to flat black and white.
 
+Light and dark follow the theme's own `mode`, so switching to a light Omarchy
+theme switches the timer with it, live and without a restart. `B` overrides
+that until the next theme change, which takes back over — picking a theme is
+a fresh instruction, not something an old keypress should outrank.
+
 Text uses iA Writer Mono S when it's installed (`ttf-ia-writer`), which is
 what omacalc and omawrite use. Without it the timer falls back to the default
 monospace face.
