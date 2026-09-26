@@ -30,27 +30,32 @@ shows as plain seconds. The number shrinks to fit when the units make it long.
 |-----|--------|
 | Enter / Space | start or stop |
 | R | reset to the saved duration |
-| B | swap the dark and light background |
-| Ctrl+M | mute |
-| Esc | quit |
+| Ctrl+M | mute (also the speaker button, bottom right) |
+| ? / F1 | show or hide the shortcuts and the volume slider (also the ? button, bottom left) |
 
 Shortcuts are case-insensitive and work while the duration box has focus;
 `h`, `m`, `s`, digits and `.` still type normally, which is why mute moved to
 Ctrl+M (a plain `m` is part of `25m`).
+
+## Volume
+
+Sounds play at 20% of the system volume by default. Mute (Ctrl+M or the
+speaker button) is remembered too, so a new timer opens muted if the last one
+was. The slider in the help
+window (`?`) changes that; it's saved straight away and shared by every open
+timer. It sets the sound's own volume, so it still follows the system volume.
 
 ## Colors
 
 Colors come from the current Omarchy theme
 (`~/.local/state/omarchy/current/theme/colors.toml`), the same file omacalc
 and omawrite read, and re-tint live when you switch themes. The theme gives
-one background/foreground pair and `B` swaps to it turned inside out, so both
-the dark and the light background stay in the theme's palette rather than
-falling back to flat black and white.
+one background/foreground pair; a light theme uses it turned inside out, so the
+light background stays in the theme's palette rather than flat white.
 
 Light and dark follow the theme's own `mode`, so switching to a light Omarchy
-theme switches the timer with it, live and without a restart. `B` overrides
-that until the next theme change, which takes back over — picking a theme is
-a fresh instruction, not something an old keypress should outrank.
+theme switches the timer with it, live and without a restart. There's no manual
+light/dark toggle.
 
 Text uses iA Writer Mono S when it's installed (`ttf-ia-writer`), which is
 what omacalc and omawrite use. Without it the timer falls back to the default
@@ -64,9 +69,9 @@ window along with everything else.
 
 - Countdown runs against a wall-clock deadline, so a slow or blocked tick
   can't make the timer drift.
-- Background choice and last duration persist across restarts
+- Last duration persists across restarts
   (`~/.config/omarchy/omatimer.conf`), which was an open TODO in papertimer.
-- The play, reset and contrast marks are drawn with QPainter rather than
+- The play, reset, mute and help marks are drawn with QPainter rather than
   typed as glyphs, which several monospace faces are missing.
 - A hairline under the number fills as the timer runs.
 - Font size scales with the window instead of via CSS media queries. One
