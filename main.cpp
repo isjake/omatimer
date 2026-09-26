@@ -1,13 +1,15 @@
 // omatimer - a native Qt6 rewrite of papertimer.
-// Type a duration, hit Enter/Space to start or stop, R to reset, B to swap
-// between the dark and light background, Ctrl+M to mute.
+// Type a duration, hit Enter/Space to start or stop, R to reset, Ctrl+M to
+// mute, ? for the shortcut list.
 
 #include <QApplication>
 #include <QWidget>
+#include <QDialog>
 #include <QAbstractButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QSlider>
 #include <QLineEdit>
 #include <QTimer>
 #include <QKeyEvent>
@@ -106,7 +108,7 @@ static QString clockString(const QDateTime &t)
 class IconButton : public QAbstractButton
 {
 public:
-    enum Kind { Play, Pause, Reset, Contrast };
+    enum Kind { Play, Pause, Reset, Sound, Muted, Help, Close };
 
     IconButton(Kind kind, QWidget *parent = nullptr)
         : QAbstractButton(parent), kind(kind)
@@ -193,19 +195,56 @@ protected:
             p.drawPath(head);
             break;
         }
-        case Contrast: {
-            // Half-filled circle: the usual mark for swapping light and dark.
+        case Sound:
+        case Muted: {
+            // A speaker, shifted left to leave room for the waves or the X.
+            const qreal x = c.x() - s * 0.28;
+            QPainterPath speaker;
+            speaker.moveTo(x - s * 0.40, c.y() - s * 0.16);
+            speaker.lineTo(x - s * 0.18, c.y() - s * 0.16);
+            speaker.lineTo(x + s * 0.12, c.y() - s * 0.42);
+            speaker.lineTo(x + s * 0.12, c.y() + s * 0.42);
+            speaker.lineTo(x - s * 0.18, c.y() + s * 0.16);
+            speaker.lineTo(x - s * 0.40, c.y() + s * 0.16);
+            speaker.closeSubpath();
+            p.drawPath(speaker);
+
+            const qreal thick = qMax(1.2, s * 0.10);
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(ink, thick, Qt::SolidLine, Qt::RoundCap));
+            if (kind == Sound) {
+                for (const qreal rad : {s * 0.28, s * 0.52}) {
+                    const QRectF arc(x + s * 0.12 - rad, c.y() - rad, rad * 2, rad * 2);
+                    p.drawArc(arc, -45 * 16, 90 * 16);
+                }
+            } else {
+                const qreal cx = x + s * 0.50, d = s * 0.17;
+                p.drawLine(QPointF(cx - d, c.y() - d), QPointF(cx + d, c.y() + d));
+                p.drawLine(QPointF(cx - d, c.y() + d), QPointF(cx + d, c.y() - d));
+            }
+            break;
+        }
+        case Help: {
+            // "?" in a ring. The question mark is in every face, unlike the
+            // shapes above.
             const qreal rad = s * 0.5;
             p.setBrush(Qt::NoBrush);
-            p.setPen(QPen(ink, qMax(1.2, s * 0.11)));
+            p.setPen(QPen(ink, qMax(1.2, s * 0.10)));
             p.drawEllipse(c, rad, rad);
-            p.setPen(Qt::NoPen);
-            p.setBrush(ink);
-            QPainterPath half;
-            half.moveTo(c.x(), c.y() - rad);
-            half.arcTo(QRectF(c.x() - rad, c.y() - rad, rad * 2, rad * 2), 90, 180);
-            half.closeSubpath();
-            p.drawPath(half);
+            QFont f(uiFontFamily());
+            f.setPixelSize(qMax(6, qRound(s * 0.66)));
+            f.setBold(true);
+            p.setFont(f);
+            p.drawText(QRectF(c.x() - rad, c.y() - rad, rad * 2, rad * 2),
+                       Qt::AlignCenter, QStringLiteral("?"));
+            break;
+        }
+        case Close: {
+            const qreal d = s * 0.30;
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(ink, qMax(1.2, s * 0.10), Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(QPointF(c.x() - d, c.y() - d), QPointF(c.x() + d, c.y() + d));
+            p.drawLine(QPointF(c.x() - d, c.y() + d), QPointF(c.x() + d, c.y() - d));
             break;
         }
         }
@@ -256,6 +295,29 @@ private:
     QColor page = Qt::black, ink = Qt::white, accent = Qt::white;
 };
 
+// The shortcuts window. Esc doesn't close it (QDialog's default); the X,
+// the ? button or ?/F1 do, so it can stay open beside a running timer.
+class HelpDialog : public QDialog
+{
+public:
+    using QDialog::QDialog;
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            return;
+        case Qt::Key_Question:
+        case Qt::Key_F1:
+            hide();
+            return;
+        default:
+            QDialog::keyPressEvent(event);
+        }
+    }
+};
+
 class Omatimer : public QWidget
 {
 public:
@@ -268,8 +330,12 @@ public:
 
         const QString family = uiFontFamily();
 
-        contrast = new IconButton(IconButton::Contrast);
-        contrast->setChrome(false);
+        help = new IconButton(IconButton::Help);
+        help->setChrome(false);
+        help->setToolTip("Shortcuts (?)");
+        mute = new IconButton(IconButton::Sound);
+        mute->setChrome(false);
+        mute->setToolTip("Mute (Ctrl+M)");
 
         input = new QLineEdit;
         input->setPlaceholderText("60s");
@@ -291,16 +357,15 @@ public:
 
         schedule->setFont(QFont(family));
 
-        // A spacer the width of the contrast mark keeps play/reset centred
-        // while the mark sits off to the right.
-        balance = new QWidget;
+        // Help and mute are the same size, so play/reset stay centred
+        // between them.
         auto *buttons = new QHBoxLayout;
-        buttons->addWidget(balance);
+        buttons->addWidget(help);
         buttons->addStretch();
         buttons->addWidget(playPause);
         buttons->addWidget(reset);
         buttons->addStretch();
-        buttons->addWidget(contrast);
+        buttons->addWidget(mute);
 
         auto *bar = new QHBoxLayout;
         bar->addStretch(1);
@@ -328,24 +393,23 @@ public:
             play(kBellSound);
             resetTimer();
         });
-        connect(contrast, &QAbstractButton::clicked, this, [this] { swapBackground(); });
+        connect(help, &QAbstractButton::clicked, this, [this] { showHelp(); });
+        connect(mute, &QAbstractButton::clicked, this, [this] { toggleMute(); });
 
         QSettings s;
         savedSeconds = s.value("savedSeconds", 60).toInt();
+        volume = qBound(0, s.value("volume", 20).toInt(), 100);
+        muted = s.value("muted", false).toBool();
+        mute->setKind(muted ? IconButton::Muted : IconButton::Sound);
+        mute->setToolTip(muted ? "Unmute (Ctrl+M)" : "Mute (Ctrl+M)");
+        setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
         loadOmarchyColors();
-        overridden = s.value("backgroundOverridden", false).toBool();
-        theme = overridden ? s.value("theme", 0).toInt() % 2
-                           : (themeIsLight ? 1 : 0);
 
         // Re-tint live when the Omarchy theme changes, the way omacalc does.
         watcher = new QFileSystemWatcher(this);
         watcher->addPath(omarchyColorsPath());
         connect(watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &f) {
             loadOmarchyColors();
-            // Picking a new theme is a fresh instruction, so it overrides an
-            // earlier B press rather than being ignored by it.
-            overridden = false;
-            theme = themeIsLight ? 1 : 0;
             applyTheme();
             if (!watcher->files().contains(f))
                 watcher->addPath(f); // themes replace the file, not edit it
@@ -412,8 +476,8 @@ protected:
         playPause->setFixedSize(hit, hit);
         reset->setFixedSize(hit, hit);
         const int mark = qRound(qBound(18.0, u * 1.6, 60.0));
-        contrast->setFixedSize(mark, mark);
-        balance->setFixedSize(mark, 1);
+        help->setFixedSize(mark, mark);
+        mute->setFixedSize(mark, mark);
 
         progress->setFixedHeight(qRound(qBound(3.0, u * 0.22, 10.0)));
 
@@ -426,8 +490,6 @@ protected:
     void closeEvent(QCloseEvent *event) override
     {
         QSettings s;
-        s.setValue("theme", theme);
-        s.setValue("backgroundOverridden", overridden);
         s.setValue("savedSeconds", savedSeconds);
         QWidget::closeEvent(event);
     }
@@ -475,17 +537,14 @@ private:
             play(kBellSound);
             resetTimer();
             return true;
-        case Qt::Key_B:
-            swapBackground();
-            return true;
         case Qt::Key_M:
             if (!(event->modifiers() & Qt::ControlModifier))
                 return false; // plain "m" is part of "25m"
-            muted = !muted;
-            setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
+            toggleMute();
             return true;
-        case Qt::Key_Escape:
-            close();
+        case Qt::Key_Question:
+        case Qt::Key_F1:
+            showHelp();
             return true;
         default:
             return false;
@@ -574,12 +633,101 @@ private:
         progress->setFraction(0.0);
     }
 
-    void swapBackground()
+    void toggleMute()
     {
-        theme = 1 - theme;
-        // Back to following the theme once B lands on what it asked for.
-        overridden = theme != (themeIsLight ? 1 : 0);
-        applyTheme();
+        muted = !muted;
+        // Saved straight away, like volume, so the next timer opens the same.
+        QSettings().setValue("muted", muted);
+        mute->setKind(muted ? IconButton::Muted : IconButton::Sound);
+        mute->setToolTip(muted ? "Unmute (Ctrl+M)" : "Mute (Ctrl+M)");
+        setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
+    }
+
+    // A small themed window rather than a QMessageBox, so it matches the
+    // timer instead of the stock dialog look. The ? button toggles it.
+    void showHelp()
+    {
+        if (helpWindow && helpWindow->isVisible()) {
+            helpWindow->hide();
+            return;
+        }
+        if (!helpWindow) {
+            helpWindow = new HelpDialog(this);
+            helpWindow->setWindowTitle("Omatimer shortcuts");
+            helpWindow->setObjectName("help");
+            helpText = new QLabel;
+            helpText->setTextFormat(Qt::RichText);
+            QFont f(uiFontFamily());
+            f.setPointSizeF(11);
+            helpText->setFont(f);
+            // Volume lives here rather than on the main window, which stays
+            // clear for the number. It previews on release, not while
+            // dragging, so a drag doesn't fire a stack of chimes.
+            volumeLabel = new QLabel;
+            volumeLabel->setFont(f);
+            volumeSlider = new QSlider(Qt::Horizontal);
+            volumeSlider->setRange(0, 100);
+            volumeSlider->setValue(volume);
+            volumeSlider->setFocusPolicy(Qt::NoFocus);
+            connect(volumeSlider, &QSlider::valueChanged, this, [this](int v) {
+                volume = v;
+                // Saved now, not on close, so a second timer that closes
+                // later doesn't put back its older value.
+                QSettings().setValue("volume", v);
+                volumeLabel->setText(QString("Volume  %1%").arg(v));
+            });
+            connect(volumeSlider, &QSlider::sliderReleased, this, [this] { play(kBellSound); });
+            volumeLabel->setText(QString("Volume  %1%").arg(volume));
+
+            helpClose = new IconButton(IconButton::Close);
+            helpClose->setChrome(false);
+            helpClose->setFixedSize(24, 24);
+            helpClose->setToolTip("Close");
+            connect(helpClose, &QAbstractButton::clicked, helpWindow, &QWidget::hide);
+
+            auto *top = new QHBoxLayout;
+            top->addWidget(helpText, 0, Qt::AlignTop);
+            top->addStretch();
+            top->addWidget(helpClose, 0, Qt::AlignTop);
+
+            auto *l = new QVBoxLayout(helpWindow);
+            l->setContentsMargins(28, 24, 16, 24);
+            l->addLayout(top);
+            l->addSpacing(8);
+            l->addWidget(volumeLabel);
+            l->addWidget(volumeSlider);
+        }
+
+        static const char *rows[][2] = {
+            {"Enter / Space", "start or stop"},
+            {"R", "reset to the saved duration"},
+            {"Ctrl+M", "mute or unmute"},
+            {"? / F1", "show or hide this help"},
+        };
+        const QColor page = pages[theme], ink = inks[theme];
+        const QString quiet = mix(page, ink, 0.55).name();
+        helpClose->setColors(page, mix(page, ink, 0.55));
+        QString html = "<table cellspacing='0' cellpadding='5'>";
+        for (const auto &r : rows)
+            html += QString("<tr><td style='color:%1'>%2</td><td>&nbsp;&nbsp;%3</td></tr>")
+                        .arg(ink.name(), QString::fromUtf8(r[0]).toHtmlEscaped(),
+                             QString::fromUtf8(r[1]));
+        html += QString("</table><p style='color:%1'>Durations: <b>90</b>, <b>25m</b>,"
+                        " <b>1h30m</b>, <b>1.5m</b></p>").arg(quiet);
+        helpText->setText(html);
+        helpWindow->setStyleSheet(
+            QString("#help { background: %1; }"
+                    "QLabel { background: transparent; color: %2; }"
+                    "QSlider::groove:horizontal { height: 4px; border-radius: 2px;"
+                    "  background: %3; }"
+                    "QSlider::sub-page:horizontal { border-radius: 2px; background: %4; }"
+                    "QSlider::handle:horizontal { width: 14px; margin: -5px 0;"
+                    "  border-radius: 7px; background: %5; }")
+                .arg(page.name(), quiet, mix(page, ink, 0.12).name(), accent.name(),
+                     ink.name()));
+        helpWindow->show();
+        helpWindow->raise();
+        helpWindow->activateWindow();
     }
 
     static QString omarchyColorsPath()
@@ -623,12 +771,13 @@ private:
         inks[0] = a.second;
         pages[1] = b.first;
         inks[1] = b.second;
+        theme = themeIsLight ? 1 : 0;
     }
 
     void applyTheme()
     {
         const QColor page = pages[theme], ink = inks[theme];
-        for (IconButton *b : {playPause, reset, contrast})
+        for (IconButton *b : {playPause, reset, help, mute})
             b->setColors(page, ink);
         progress->setColors(page, ink, accent);
 
@@ -644,22 +793,26 @@ private:
 
     // Qt Multimedia would drag in FFmpeg, VA-API and GTK just to play a
     // one-second chime, so hand the file to PipeWire and forget about it.
+    // Volume is the stream's own, so it scales whatever the system is set to.
     void play(const QString &path)
     {
-        if (muted || !QFileInfo::exists(path))
+        if (muted || volume <= 0 || !QFileInfo::exists(path))
             return;
-        static const QString player =
-            QStandardPaths::findExecutable("pw-play").isEmpty()
-                ? QStandardPaths::findExecutable("paplay")
-                : QStandardPaths::findExecutable("pw-play");
-        if (!player.isEmpty())
-            QProcess::startDetached(player, {path});
+        static const QString pwPlay = QStandardPaths::findExecutable("pw-play");
+        static const QString paplay = QStandardPaths::findExecutable("paplay");
+        if (!pwPlay.isEmpty())
+            QProcess::startDetached(pwPlay, {"--volume", QString::number(volume / 100.0), path});
+        else if (!paplay.isEmpty())
+            QProcess::startDetached(paplay, {"--volume=" + QString::number(volume * 65536 / 100), path});
     }
 
     QLabel *schedule;
-    QWidget *balance;
     QLineEdit *input;
-    IconButton *playPause, *reset, *contrast;
+    IconButton *playPause, *reset, *help, *mute;
+    HelpDialog *helpWindow = nullptr;
+    IconButton *helpClose = nullptr;
+    QLabel *helpText = nullptr, *volumeLabel = nullptr;
+    QSlider *volumeSlider = nullptr;
     ProgressLine *progress;
     QTimer *ticker;
     QFileSystemWatcher *watcher = nullptr;
@@ -668,8 +821,9 @@ private:
     qreal bigCap = 60.0;
     int fittedLength = -1;
     int activeSeconds = 60, savedSeconds = 60, runSeconds = 60, theme = 0;
+    int volume = 20; // percent of the system volume
     bool running = false, muted = false;
-    bool themeIsLight = false, overridden = false;
+    bool themeIsLight = false;
 };
 
 int main(int argc, char *argv[])
