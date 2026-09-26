@@ -808,8 +808,8 @@ private:
         helpWindow->activateWindow();
     }
 
-    // Every sound in the theme, grouped so the likely picks come first and the
-    // speaker-test tones sit out of the way at the bottom. Group headings are
+    // The theme's sounds, grouped so the likely picks come first. The
+    // speaker-test tones ("front left", ...) are left out. Group headings are
     // disabled rows. Picking one previews it and saves straight away.
     QComboBox *makeSoundPicker(const QString &key, const char *fallback, QString *target)
     {
@@ -819,15 +819,15 @@ private:
 
         const QStringList files = QDir(QString::fromUtf8(kSoundDir))
                                       .entryList({"*.oga"}, QDir::Files, QDir::Name);
-        QStringList usual, other, tones;
+        QStringList usual, other;
         for (const QString &name : timerFriendly)
             if (files.contains(name + ".oga"))
                 usual << name;
         for (const QString &file : files) {
             const QString name = QFileInfo(file).completeBaseName();
             if (name.startsWith("audio-channel-") || name == "audio-test-signal")
-                tones << name;
-            else if (!timerFriendly.contains(name))
+                continue;
+            if (!timerFriendly.contains(name))
                 other << name;
         }
 
@@ -853,7 +853,6 @@ private:
         model->appendRow(none);
         if (!usual.isEmpty()) { addHeading("Good for timers"); addSounds(usual); }
         if (!other.isEmpty()) { addHeading("Other system sounds"); addSounds(other); }
-        if (!tones.isEmpty()) { addHeading("Speaker test tones"); addSounds(tones); }
         combo->setModel(model);
         combo->setMaxVisibleItems(16);
         combo->setFont(QFont(uiFontFamily()));
