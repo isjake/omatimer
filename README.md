@@ -49,8 +49,8 @@ timer. It sets the sound's own volume, so it still follows the system volume.
 
 The help window (`?`) also picks the **button sound** and the **done sound**
 from every sound in the freedesktop sound theme
-(`/usr/share/sounds/freedesktop/stereo/`), grouped as good-for-timers, other
-system sounds and speaker test tones, or None. Picking one plays a preview.
+(`/usr/share/sounds/freedesktop/stereo/`), grouped as good-for-timers and other
+system sounds (speaker test tones left out), or None. Picking one plays a preview.
 
 **Font** is *Match system* by default: fontconfig's `monospace`, the font
 `omarchy font set` changes. *iA Writer* can be picked instead, and is the
