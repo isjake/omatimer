@@ -33,19 +33,54 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QFileSystemWatcher>
+#include <QComboBox>
+#include <QGridLayout>
+#include <QStandardItemModel>
+#include <signal.h>
 
-static const char *kCompleteSound =
-    "/usr/share/sounds/freedesktop/stereo/complete.oga";
-static const char *kBellSound =
-    "/usr/share/sounds/freedesktop/stereo/message.oga";
+// The freedesktop sound theme: the stock set most Linux desktops ship, which
+// is where both sounds come from. Stored by name ("complete"), or "none".
+static const char *kSoundDir = "/usr/share/sounds/freedesktop/stereo/";
+static const char *kDefaultButtonSound = "message";
+static const char *kDefaultDoneSound = "complete";
 
-// The face omacalc and omawrite use, so the three apps look related.
-static QString uiFontFamily()
+static QString soundPath(const QString &name)
+{
+    if (name.isEmpty() || name == "none")
+        return QString();
+    return QString::fromUtf8(kSoundDir) + name + ".oga";
+}
+
+// "system" follows the desktop's monospace font (what `omarchy font set`
+// changes); "iawriter" is the face omacalc and omawrite use.
+static QString gFontChoice = QStringLiteral("system");
+
+static QString iaWriterFamily()
 {
     for (const char *want : {"iA Writer Mono S", "iA Writer Duospace"})
         if (QFontDatabase::families().contains(QString::fromUtf8(want)))
             return QString::fromUtf8(want);
-    return QStringLiteral("monospace");
+    return QString();
+}
+
+// fontconfig's "monospace" alias, resolved to a real name the way
+// `omarchy font current` does.
+static QString systemMonoFamily()
+{
+    return QFontInfo(QFont(QStringLiteral("monospace"))).family();
+}
+
+// iA Writer is the fallback either way round: behind the system font when
+// that can't be resolved, and chosen outright when picked.
+static QString uiFontFamily()
+{
+    const QString ia = iaWriterFamily();
+    if (gFontChoice == "iawriter" && !ia.isEmpty())
+        return ia;
+    const QString sys = systemMonoFamily();
+    if (!sys.isEmpty())
+        return sys;
+    return ia.isEmpty() ? QStringLiteral("monospace") : ia;
 }
 
 // omacalc builds every surface by mixing ink into the page rather than
@@ -334,7 +369,6 @@ public:
         help->setChrome(false);
         help->setToolTip("Shortcuts (?)");
         mute = new IconButton(IconButton::Sound);
-        mute->setChrome(false);
         mute->setToolTip("Mute (Ctrl+M)");
 
         input = new QLineEdit;
@@ -357,15 +391,17 @@ public:
 
         schedule->setFont(QFont(family));
 
-        // Help and mute are the same size, so play/reset stay centred
-        // between them.
+        // A spacer the width of the help mark keeps play/reset/mute centred
+        // while the mark sits off to the right.
+        balance = new QWidget;
         auto *buttons = new QHBoxLayout;
-        buttons->addWidget(help);
+        buttons->addWidget(balance);
         buttons->addStretch();
         buttons->addWidget(playPause);
         buttons->addWidget(reset);
-        buttons->addStretch();
         buttons->addWidget(mute);
+        buttons->addStretch();
+        buttons->addWidget(help);
 
         auto *bar = new QHBoxLayout;
         bar->addStretch(1);
@@ -386,11 +422,11 @@ public:
         connect(ticker, &QTimer::timeout, this, &Omatimer::tick);
 
         connect(playPause, &QAbstractButton::clicked, this, [this] {
-            play(kBellSound);
+            play(buttonSound);
             startOrStop();
         });
         connect(reset, &QAbstractButton::clicked, this, [this] {
-            play(kBellSound);
+            play(buttonSound);
             resetTimer();
         });
         connect(help, &QAbstractButton::clicked, this, [this] { showHelp(); });
@@ -400,6 +436,8 @@ public:
         savedSeconds = s.value("savedSeconds", 60).toInt();
         volume = qBound(0, s.value("volume", 20).toInt(), 100);
         muted = s.value("muted", false).toBool();
+        buttonSound = soundPath(s.value("buttonSound", kDefaultButtonSound).toString());
+        doneSound = soundPath(s.value("doneSound", kDefaultDoneSound).toString());
         mute->setKind(muted ? IconButton::Muted : IconButton::Sound);
         mute->setToolTip(muted ? "Unmute (Ctrl+M)" : "Mute (Ctrl+M)");
         setWindowTitle(muted ? "Omatimer (muted)" : "Omatimer");
@@ -475,9 +513,10 @@ protected:
         const int hit = qRound(qBound(40.0, u * 3.6, 150.0));
         playPause->setFixedSize(hit, hit);
         reset->setFixedSize(hit, hit);
+        mute->setFixedSize(hit, hit);
         const int mark = qRound(qBound(18.0, u * 1.6, 60.0));
         help->setFixedSize(mark, mark);
-        mute->setFixedSize(mark, mark);
+        balance->setFixedSize(mark, 1);
 
         progress->setFixedHeight(qRound(qBound(3.0, u * 0.22, 10.0)));
 
@@ -530,11 +569,11 @@ private:
         case Qt::Key_Return:
         case Qt::Key_Enter:
         case Qt::Key_Space:
-            play(kBellSound);
+            play(buttonSound);
             startOrStop();
             return true;
         case Qt::Key_R:
-            play(kBellSound);
+            play(buttonSound);
             resetTimer();
             return true;
         case Qt::Key_M:
@@ -616,7 +655,7 @@ private:
             progress->setFraction(1.0);
             schedule->setText(QString("done  ·  %1").arg(formatDuration(savedSeconds)));
             input->setText(formatDuration(savedSeconds));
-            play(kCompleteSound);
+            play(doneSound);
             return;
         }
         scheduleTick();
@@ -676,7 +715,7 @@ private:
                 QSettings().setValue("volume", v);
                 volumeLabel->setText(QString("Volume  %1%").arg(v));
             });
-            connect(volumeSlider, &QSlider::sliderReleased, this, [this] { play(kBellSound); });
+            connect(volumeSlider, &QSlider::sliderReleased, this, [this] { play(buttonSound.isEmpty() ? doneSound : buttonSound, true); });
             volumeLabel->setText(QString("Volume  %1%").arg(volume));
 
             helpClose = new IconButton(IconButton::Close);
@@ -696,6 +735,38 @@ private:
             l->addSpacing(8);
             l->addWidget(volumeLabel);
             l->addWidget(volumeSlider);
+
+            auto *picks = new QGridLayout;
+            picks->setHorizontalSpacing(16);
+            picks->setColumnStretch(1, 1);
+            int row = 0;
+            auto addPick = [&](const QString &text, QWidget *picker) {
+                auto *label = new QLabel(text);
+                label->setFont(f);
+                picks->addWidget(label, row, 0);
+                picks->addWidget(picker, row, 1);
+                ++row;
+            };
+            addPick("Button sound", makeSoundPicker("buttonSound", kDefaultButtonSound, &buttonSound));
+            addPick("Done sound", makeSoundPicker("doneSound", kDefaultDoneSound, &doneSound));
+            addPick("Font", makeFontPicker());
+            l->addSpacing(12);
+            l->addLayout(picks);
+
+            // A line on where the sounds live, for anyone curious enough to
+            // go looking or add their own.
+            auto *source = new QLabel(QString(
+                "Sounds come from the freedesktop sound theme, the standard set most"
+                " Linux desktops share, in %1. They play through PipeWire, the"
+                " system's audio server, at the volume above.").arg(kSoundDir));
+            source->setObjectName("source");
+            source->setWordWrap(true);
+            QFont small(uiFontFamily());
+            small.setPointSizeF(9);
+            source->setFont(small);
+            l->addSpacing(14);
+            l->addWidget(source);
+            helpWindow->setMinimumWidth(480);
         }
 
         static const char *rows[][2] = {
@@ -722,12 +793,119 @@ private:
                     "  background: %3; }"
                     "QSlider::sub-page:horizontal { border-radius: 2px; background: %4; }"
                     "QSlider::handle:horizontal { width: 14px; margin: -5px 0;"
-                    "  border-radius: 7px; background: %5; }")
+                    "  border-radius: 7px; background: %5; }"
+                    "#source { color: %6; }"
+                    "QComboBox { background: %7; color: %5; border: 1px solid %3;"
+                    "  border-radius: 6px; padding: 4px 10px; }"
+                    "QComboBox::drop-down { border: none; width: 18px; }"
+                    "QComboBox QAbstractItemView { background: %1; color: %5;"
+                    "  border: 1px solid %3; outline: none;"
+                    "  selection-background-color: %7; selection-color: %5; }")
                 .arg(page.name(), quiet, mix(page, ink, 0.12).name(), accent.name(),
-                     ink.name()));
+                     ink.name(), mix(page, ink, 0.4).name(), mix(page, ink, 0.06).name()));
         helpWindow->show();
         helpWindow->raise();
         helpWindow->activateWindow();
+    }
+
+    // Every sound in the theme, grouped so the likely picks come first and the
+    // speaker-test tones sit out of the way at the bottom. Group headings are
+    // disabled rows. Picking one previews it and saves straight away.
+    QComboBox *makeSoundPicker(const QString &key, const char *fallback, QString *target)
+    {
+        static const QStringList timerFriendly = {
+            "complete", "bell", "message", "message-new-instant", "alarm-clock-elapsed",
+            "window-attention", "dialog-information", "service-login"};
+
+        const QStringList files = QDir(QString::fromUtf8(kSoundDir))
+                                      .entryList({"*.oga"}, QDir::Files, QDir::Name);
+        QStringList usual, other, tones;
+        for (const QString &name : timerFriendly)
+            if (files.contains(name + ".oga"))
+                usual << name;
+        for (const QString &file : files) {
+            const QString name = QFileInfo(file).completeBaseName();
+            if (name.startsWith("audio-channel-") || name == "audio-test-signal")
+                tones << name;
+            else if (!timerFriendly.contains(name))
+                other << name;
+        }
+
+        auto *combo = new QComboBox;
+        auto *model = new QStandardItemModel(combo);
+        auto addHeading = [model](const QString &text) {
+            auto *item = new QStandardItem(text);
+            item->setFlags(Qt::NoItemFlags);
+            QFont bold = item->font();
+            bold.setBold(true);
+            item->setFont(bold);
+            model->appendRow(item);
+        };
+        auto addSounds = [model](const QStringList &names) {
+            for (const QString &name : names) {
+                auto *item = new QStandardItem("  " + QString(name).replace('-', ' '));
+                item->setData(name, Qt::UserRole);
+                model->appendRow(item);
+            }
+        };
+        auto *none = new QStandardItem("None");
+        none->setData("none", Qt::UserRole);
+        model->appendRow(none);
+        if (!usual.isEmpty()) { addHeading("Good for timers"); addSounds(usual); }
+        if (!other.isEmpty()) { addHeading("Other system sounds"); addSounds(other); }
+        if (!tones.isEmpty()) { addHeading("Speaker test tones"); addSounds(tones); }
+        combo->setModel(model);
+        combo->setMaxVisibleItems(16);
+        combo->setFont(QFont(uiFontFamily()));
+
+        const int at = combo->findData(QSettings().value(key, fallback).toString(), Qt::UserRole);
+        combo->setCurrentIndex(at >= 0 ? at : 0);
+
+        connect(combo, &QComboBox::activated, this, [this, combo, key, target](int i) {
+            const QString name = combo->itemData(i, Qt::UserRole).toString();
+            QSettings().setValue(key, name);
+            *target = soundPath(name);
+            play(*target, true);
+        });
+        return combo;
+    }
+
+    QComboBox *makeFontPicker()
+    {
+        auto *combo = new QComboBox;
+        combo->setFont(QFont(uiFontFamily()));
+        combo->addItem(QString("Match system (%1)").arg(systemMonoFamily()), "system");
+        combo->addItem("iA Writer", "iawriter");
+        if (iaWriterFamily().isEmpty()) {
+            // Listed but greyed out, so it's clear the option exists.
+            if (auto *m = qobject_cast<QStandardItemModel *>(combo->model()))
+                m->item(1)->setFlags(Qt::NoItemFlags);
+            combo->setItemText(1, "iA Writer (not installed)");
+        }
+        combo->setCurrentIndex(qMax(0, combo->findData(gFontChoice)));
+        connect(combo, &QComboBox::activated, this, [this, combo](int i) {
+            gFontChoice = combo->itemData(i).toString();
+            QSettings().setValue("font", gFontChoice);
+            // Deferred: this runs inside the combo that the rebuild deletes.
+            QTimer::singleShot(0, this, [this] { refreshFonts(); });
+        });
+        return combo;
+    }
+
+    // Everything sized in resizeEvent picks the family up again from there;
+    // the help window is simplest rebuilt.
+    void refreshFonts()
+    {
+        QResizeEvent ev(size(), size());
+        resizeEvent(&ev);
+        help->update();
+        if (helpWindow) {
+            const QPoint at = helpWindow->pos();
+            helpWindow->deleteLater();
+            helpWindow = nullptr;
+            showHelp();
+            helpWindow->move(at);
+        }
     }
 
     static QString omarchyColorsPath()
@@ -794,25 +972,44 @@ private:
     // Qt Multimedia would drag in FFmpeg, VA-API and GTK just to play a
     // one-second chime, so hand the file to PipeWire and forget about it.
     // Volume is the stream's own, so it scales whatever the system is set to.
-    void play(const QString &path)
+    // A preview cuts off the previous one: some theme sounds run for seconds,
+    // and scrolling through the list shouldn't stack them up.
+    void play(const QString &path, bool preview = false)
     {
-        if (muted || volume <= 0 || !QFileInfo::exists(path))
+        if (muted || volume <= 0 || path.isEmpty() || !QFileInfo::exists(path))
             return;
         static const QString pwPlay = QStandardPaths::findExecutable("pw-play");
         static const QString paplay = QStandardPaths::findExecutable("paplay");
+        // Only if it's still our player: the pid could have been reused.
+        if (preview && previewPid > 0) {
+            QFile comm(QString("/proc/%1/comm").arg(previewPid));
+            if (comm.open(QIODevice::ReadOnly)) {
+                const QByteArray name = comm.readAll().trimmed();
+                if (name == "pw-play" || name == "pw-cat" || name == "paplay")
+                    ::kill(static_cast<pid_t>(previewPid), SIGTERM);
+            }
+        }
+        qint64 pid = 0;
         if (!pwPlay.isEmpty())
-            QProcess::startDetached(pwPlay, {"--volume", QString::number(volume / 100.0), path});
+            QProcess::startDetached(pwPlay, {"--volume", QString::number(volume / 100.0), path},
+                                    QString(), &pid);
         else if (!paplay.isEmpty())
-            QProcess::startDetached(paplay, {"--volume=" + QString::number(volume * 65536 / 100), path});
+            QProcess::startDetached(paplay, {"--volume=" + QString::number(volume * 65536 / 100), path},
+                                    QString(), &pid);
+        if (preview)
+            previewPid = pid;
     }
 
     QLabel *schedule;
+    QWidget *balance;
     QLineEdit *input;
     IconButton *playPause, *reset, *help, *mute;
     HelpDialog *helpWindow = nullptr;
     IconButton *helpClose = nullptr;
     QLabel *helpText = nullptr, *volumeLabel = nullptr;
     QSlider *volumeSlider = nullptr;
+    QString buttonSound, doneSound; // full paths, empty for none
+    qint64 previewPid = 0;
     ProgressLine *progress;
     QTimer *ticker;
     QFileSystemWatcher *watcher = nullptr;
@@ -831,6 +1028,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("omarchy");
     QCoreApplication::setApplicationName("omatimer");
+    gFontChoice = QSettings().value("font", "system").toString();
     const QStringList args = QCoreApplication::arguments();
     QString preset;
     bool autostart = false;

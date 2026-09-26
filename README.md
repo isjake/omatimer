@@ -30,8 +30,8 @@ shows as plain seconds. The number shrinks to fit when the units make it long.
 |-----|--------|
 | Enter / Space | start or stop |
 | R | reset to the saved duration |
-| Ctrl+M | mute (also the speaker button, bottom right) |
-| ? / F1 | show or hide the shortcuts and the volume slider (also the ? button, bottom left) |
+| Ctrl+M | mute (also the speaker button, next to reset) |
+| ? / F1 | show or hide the shortcuts and the volume slider (also the ? button, bottom right) |
 
 Shortcuts are case-insensitive and work while the duration box has focus;
 `h`, `m`, `s`, digits and `.` still type normally, which is why mute moved to
@@ -45,6 +45,18 @@ was. The slider in the help
 window (`?`) changes that; it's saved straight away and shared by every open
 timer. It sets the sound's own volume, so it still follows the system volume.
 
+## Sounds and font
+
+The help window (`?`) also picks the **button sound** and the **done sound**
+from every sound in the freedesktop sound theme
+(`/usr/share/sounds/freedesktop/stereo/`), grouped as good-for-timers, other
+system sounds and speaker test tones, or None. Picking one plays a preview.
+
+**Font** is *Match system* by default: fontconfig's `monospace`, the font
+`omarchy font set` changes. *iA Writer* can be picked instead, and is the
+fallback if the system font can't be resolved. All of these are saved as soon
+as they change.
+
 ## Colors
 
 Colors come from the current Omarchy theme
@@ -57,9 +69,8 @@ Light and dark follow the theme's own `mode`, so switching to a light Omarchy
 theme switches the timer with it, live and without a restart. There's no manual
 light/dark toggle.
 
-Text uses iA Writer Mono S when it's installed (`ttf-ia-writer`), which is
-what omacalc and omawrite use. Without it the timer falls back to the default
-monospace face.
+Text follows the system monospace font unless iA Writer is picked in the help
+window (`ttf-ia-writer`, the face omacalc and omawrite use).
 
 The window is painted opaque and keeps Omarchy's `default-opacity` tag, so
 transparency is the compositor's job and Super+Alt+Backspace toggles this
