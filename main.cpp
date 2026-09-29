@@ -37,6 +37,7 @@
 #include <QGridLayout>
 #include <QStandardItemModel>
 #include <signal.h>
+#include <fontconfig/fontconfig.h>
 
 // The freedesktop sound theme: the stock set most Linux desktops ship, which
 // is where both sounds come from. Stored by name ("complete"), or "none".
@@ -64,10 +65,46 @@ static QString iaWriterFamily()
 }
 
 // fontconfig's "monospace" alias, resolved to a real name the way
-// `omarchy font current` does.
+// `omarchy font current` does. Asked of fontconfig directly, with a fresh
+// config each time, because Qt reads the alias once at startup and never
+// notices `omarchy font set` rewriting it. Cached until that happens.
+static QString gSystemMono;
+
+static QString resolveSystemMono()
+{
+    QString family;
+    FcConfig *config = FcInitLoadConfigAndFonts();
+    FcPattern *pat = FcNameParse(reinterpret_cast<const FcChar8 *>("monospace"));
+    if (config && pat) {
+        FcConfigSubstitute(config, pat, FcMatchPattern);
+        FcDefaultSubstitute(pat);
+        FcResult result;
+        if (FcPattern *match = FcFontMatch(config, pat, &result)) {
+            FcChar8 *name = nullptr;
+            if (FcPatternGetString(match, FC_FAMILY, 0, &name) == FcResultMatch)
+                family = QString::fromUtf8(reinterpret_cast<const char *>(name));
+            FcPatternDestroy(match);
+        }
+    }
+    if (pat)
+        FcPatternDestroy(pat);
+    if (config)
+        FcConfigDestroy(config);
+    return family;
+}
+
 static QString systemMonoFamily()
 {
-    return QFontInfo(QFont(QStringLiteral("monospace"))).family();
+    if (gSystemMono.isNull())
+        gSystemMono = resolveSystemMono();
+    return gSystemMono;
+}
+
+static QString userFontconfigPath()
+{
+    // Honours XDG_CONFIG_HOME, same as fontconfig itself.
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+           + "/fontconfig/fonts.conf";
 }
 
 // iA Writer is the fallback either way round: behind the system font when
@@ -453,6 +490,33 @@ public:
                 watcher->addPath(f); // themes replace the file, not edit it
         });
 
+        // Re-letter live when `omarchy font set` rewrites the system
+        // monospace font. The file may not exist yet, so the folder is
+        // watched too; the timer folds the truncate-then-write into one.
+        fontWatcher = new QFileSystemWatcher(this);
+        auto *fontDebounce = new QTimer(this);
+        fontDebounce->setSingleShot(true);
+        fontDebounce->setInterval(250);
+        const auto watchFontconfig = [this] {
+            const QString file = userFontconfigPath();
+            const QString dir = QFileInfo(file).absolutePath();
+            QDir().mkpath(dir);
+            if (!fontWatcher->directories().contains(dir))
+                fontWatcher->addPath(dir);
+            if (QFileInfo::exists(file) && !fontWatcher->files().contains(file))
+                fontWatcher->addPath(file);
+        };
+        watchFontconfig();
+        connect(fontWatcher, &QFileSystemWatcher::fileChanged, fontDebounce, qOverload<>(&QTimer::start));
+        connect(fontWatcher, &QFileSystemWatcher::directoryChanged, fontDebounce, qOverload<>(&QTimer::start));
+        connect(fontDebounce, &QTimer::timeout, this, [this, watchFontconfig] {
+            watchFontconfig();
+            const QString was = gSystemMono;
+            gSystemMono = resolveSystemMono();
+            if (gSystemMono != was && gFontChoice == "system")
+                refreshFonts();
+        });
+
         applyTheme();
         if (!preset.isEmpty()) {
             const int seconds = parseDurationToSeconds(preset);
@@ -556,7 +620,7 @@ private:
         if (w > avail)
             size = qMax(12.0, size * avail / w);
         f.setPointSizeF(size);
-        if (input->font().pointSizeF() != size)
+        if (input->font() != f) // the family can change, not just the size
             input->setFont(f);
     }
 
@@ -1012,6 +1076,7 @@ private:
     ProgressLine *progress;
     QTimer *ticker;
     QFileSystemWatcher *watcher = nullptr;
+    QFileSystemWatcher *fontWatcher = nullptr;
     QDateTime deadline;
     QColor pages[2], inks[2], accent;
     qreal bigCap = 60.0;

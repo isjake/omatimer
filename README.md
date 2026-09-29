@@ -53,7 +53,8 @@ from every sound in the freedesktop sound theme
 system sounds (speaker test tones left out), or None. Picking one plays a preview.
 
 **Font** is *Match system* by default: fontconfig's `monospace`, the font
-`omarchy font set` changes. *iA Writer* can be picked instead, and is the
+`omarchy font set` changes. Open timers switch to a new system font
+straight away, no restart needed. *iA Writer* can be picked instead, and is the
 fallback if the system font can't be resolved. All of these are saved as soon
 as they change.
 
