@@ -1,0 +1,41 @@
+# Maintainer: Jake Ayala <jakeayala@gmail.com>
+pkgname=omatimer-git
+_name=omatimer
+pkgver=1.1.0.r3.g0ba8d01
+pkgrel=1
+pkgdesc="Small native Qt countdown timer for Omarchy"
+arch=('x86_64' 'aarch64')
+url="https://github.com/isjake/omatimer"
+license=('LicenseRef-TODO')
+depends=('qt6-base' 'fontconfig')
+makedepends=('git' 'pkgconf')
+optdepends=('pipewire: timer sounds (pw-play)'
+            'libpulse: timer sounds (paplay)'
+            'ttf-ia-writer: the intended font')
+provides=("$_name")
+conflicts=("$_name")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$_name"
+    if git describe --tags >/dev/null 2>&1; then
+        git describe --long --tags | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+    else
+        printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+    fi
+}
+
+build() {
+    cd "$_name"
+    qmake6 "$_name.pro" -o Makefile
+    make
+}
+
+package() {
+    cd "$_name"
+    install -Dm755 "$_name" "$pkgdir/usr/bin/$_name"
+    install -Dm644 "data/$_name.desktop" "$pkgdir/usr/share/applications/$_name.desktop"
+    install -Dm644 "data/$_name.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_name.svg"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$_name/README.md"
+}
