@@ -2,10 +2,23 @@
 
 A native Qt6 rewrite of papertimer. One binary, no runtime, no browser.
 
-## Build
+## Install
 
-Needs `qt6-base`. Sounds use `pw-play` from `pipewire` (or `paplay`);
+```sh
+git clone https://github.com/isjake/omatimer.git
+cd omatimer && ./install.sh
+```
+
+It installs any missing build tools (`qt6-base`, `base-devel`; asks for your
+password only then), builds the app, and puts it in your app launcher. Nothing
+goes outside your home folder. `./install.sh --remove` uninstalls;
+`./install.sh --link` links to the build in this folder instead of copying it,
+so `make` updates the installed app (handy while working on it).
+
+Sounds use `pw-play` from `pipewire` (or `paplay`);
 without either the timer runs silently. `ttf-ia-writer` supplies the font.
+
+## Build by hand
 
 ```sh
 qmake6 omatimer.pro -o Makefile
