@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Omatimer
+GenericName=Countdown Timer
+Comment=Native Qt countdown timer
+Exec=omatimer %U
+Icon=omatimer
+Terminal=false
+Categories=Utility;Clock;
+Keywords=timer;countdown;pomodoro;stopwatch;
+StartupNotify=true
+StartupWMClass=omatimer
+Actions=pomodoro;shortbreak;
+
+[Desktop Action pomodoro]
+Name=25 minute pomodoro
+Exec=omatimer 25m --start
+
+[Desktop Action shortbreak]
+Name=5 minute break
+Exec=omatimer 5m --start
