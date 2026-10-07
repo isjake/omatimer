@@ -8,7 +8,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/isjake/omatimer"
 license=('LicenseRef-TODO')
 depends=('qt6-base' 'fontconfig')
-makedepends=('git' 'pkgconf')
+makedepends=('git')
 optdepends=('pipewire: timer sounds (pw-play)'
             'libpulse: timer sounds (paplay)'
             'ttf-ia-writer: the intended font')
