@@ -127,3 +127,7 @@ Both apps open, same machine (7.8 GB RAM), idle timer unless noted.
 PSS is the fair memory number — it splits shared libraries between the
 processes using them. RSS double-counts those, which is why Electron's
 seven processes inflate it so much.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
