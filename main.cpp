@@ -21,7 +21,6 @@
 #include <QDir>
 #include <QHash>
 #include <QFont>
-#include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPath>
@@ -50,18 +49,6 @@ static QString soundPath(const QString &name)
     if (name.isEmpty() || name == "none")
         return QString();
     return QString::fromUtf8(kSoundDir) + name + ".oga";
-}
-
-// "system" follows the desktop's monospace font (what `omarchy font set`
-// changes); "iawriter" is the face omacalc and omawrite use.
-static QString gFontChoice = QStringLiteral("system");
-
-static QString iaWriterFamily()
-{
-    for (const char *want : {"iA Writer Mono S", "iA Writer Duospace"})
-        if (QFontDatabase::families().contains(QString::fromUtf8(want)))
-            return QString::fromUtf8(want);
-    return QString();
 }
 
 // fontconfig's "monospace" alias, resolved to a real name the way
@@ -107,17 +94,11 @@ static QString userFontconfigPath()
            + "/fontconfig/fonts.conf";
 }
 
-// iA Writer is the fallback either way round: behind the system font when
-// that can't be resolved, and chosen outright when picked.
+// Always the desktop's monospace font, the one `omarchy font set` changes.
 static QString uiFontFamily()
 {
-    const QString ia = iaWriterFamily();
-    if (gFontChoice == "iawriter" && !ia.isEmpty())
-        return ia;
     const QString sys = systemMonoFamily();
-    if (!sys.isEmpty())
-        return sys;
-    return ia.isEmpty() ? QStringLiteral("monospace") : ia;
+    return sys.isEmpty() ? QStringLiteral("monospace") : sys;
 }
 
 // omacalc builds every surface by mixing ink into the page rather than
@@ -513,7 +494,7 @@ public:
             watchFontconfig();
             const QString was = gSystemMono;
             gSystemMono = resolveSystemMono();
-            if (gSystemMono != was && gFontChoice == "system")
+            if (gSystemMono != was)
                 refreshFonts();
         });
 
@@ -813,16 +794,18 @@ private:
             };
             addPick("Button sound", makeSoundPicker("buttonSound", kDefaultButtonSound, &buttonSound));
             addPick("Done sound", makeSoundPicker("doneSound", kDefaultDoneSound, &doneSound));
-            addPick("Font", makeFontPicker());
             l->addSpacing(12);
             l->addLayout(picks);
 
             // A line on where the sounds live, for anyone curious enough to
             // go looking or add their own.
-            auto *source = new QLabel(QString(
-                "Sounds come from the freedesktop sound theme, the standard set most"
-                " Linux desktops share, in %1. They play through PipeWire, the"
-                " system's audio server, at the volume above.").arg(kSoundDir));
+            const bool haveSounds = QDir(QString::fromUtf8(kSoundDir)).exists();
+            auto *source = new QLabel(haveSounds
+                ? QString("Sounds come from the freedesktop sound theme, the standard set most"
+                          " Linux desktops share, in %1. They play through PipeWire, the"
+                          " system's audio server, at the volume above.").arg(kSoundDir)
+                : QString("No sounds found: the freedesktop sound theme isn't installed."
+                          " Install it with: sudo pacman -S sound-theme-freedesktop"));
             source->setObjectName("source");
             source->setWordWrap(true);
             QFont small(uiFontFamily());
@@ -929,28 +912,6 @@ private:
             QSettings().setValue(key, name);
             *target = soundPath(name);
             play(*target, true);
-        });
-        return combo;
-    }
-
-    QComboBox *makeFontPicker()
-    {
-        auto *combo = new QComboBox;
-        combo->setFont(QFont(uiFontFamily()));
-        combo->addItem(QString("Match system (%1)").arg(systemMonoFamily()), "system");
-        combo->addItem("iA Writer", "iawriter");
-        if (iaWriterFamily().isEmpty()) {
-            // Listed but greyed out, so it's clear the option exists.
-            if (auto *m = qobject_cast<QStandardItemModel *>(combo->model()))
-                m->item(1)->setFlags(Qt::NoItemFlags);
-            combo->setItemText(1, "iA Writer (not installed)");
-        }
-        combo->setCurrentIndex(qMax(0, combo->findData(gFontChoice)));
-        connect(combo, &QComboBox::activated, this, [this, combo](int i) {
-            gFontChoice = combo->itemData(i).toString();
-            QSettings().setValue("font", gFontChoice);
-            // Deferred: this runs inside the combo that the rebuild deletes.
-            QTimer::singleShot(0, this, [this] { refreshFonts(); });
         });
         return combo;
     }
@@ -1092,7 +1053,6 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("omarchy");
     QCoreApplication::setApplicationName("omatimer");
-    gFontChoice = QSettings().value("font", "system").toString();
     const QStringList args = QCoreApplication::arguments();
     QString preset;
     bool autostart = false;
