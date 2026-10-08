@@ -7,11 +7,10 @@ pkgdesc="Small native Qt countdown timer for Omarchy"
 arch=('x86_64' 'aarch64')
 url="https://github.com/isjake/omatimer"
 license=('MIT')
-depends=('qt6-base' 'fontconfig')
+depends=('qt6-base' 'fontconfig' 'sound-theme-freedesktop')
 makedepends=('git')
 optdepends=('pipewire: timer sounds (pw-play)'
-            'libpulse: timer sounds (paplay)'
-            'ttf-ia-writer: the intended font')
+            'libpulse: timer sounds (paplay)')
 provides=("$_name")
 conflicts=("$_name")
 source=("git+$url.git")

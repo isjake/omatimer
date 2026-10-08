@@ -26,8 +26,10 @@ missing=""
 { command -v g++ && command -v make; } >/dev/null 2>&1 || missing="$missing base-devel"
 command -v qmake6 >/dev/null 2>&1 || missing="$missing qt6-base"
 [ -f /usr/include/fontconfig/fontconfig.h ] || missing="$missing fontconfig"
+# Not for building: the sound files the timer plays. Omarchy doesn't ship them.
+[ -d /usr/share/sounds/freedesktop/stereo ] || missing="$missing sound-theme-freedesktop"
 if [ -n "$missing" ]; then
-    echo "Installing build tools:$missing"
+    echo "Installing:$missing"
     sudo pacman -S --needed --noconfirm $missing
 fi
 

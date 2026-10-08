@@ -15,8 +15,9 @@ goes outside your home folder. `./install.sh --remove` uninstalls;
 `./install.sh --link` links to the build in this folder instead of copying it,
 so `make` updates the installed app (handy while working on it).
 
-Sounds use `pw-play` from `pipewire` (or `paplay`);
-without either the timer runs silently. `ttf-ia-writer` supplies the font.
+Sounds use `pw-play` from `pipewire` (or `paplay`) and the files from
+`sound-theme-freedesktop`, which Omarchy doesn't include; `install.sh` adds it.
+Without them the timer runs silently.
 
 ## Build by hand
 
@@ -58,18 +59,17 @@ was. The slider in the help
 window (`?`) changes that; it's saved straight away and shared by every open
 timer. It sets the sound's own volume, so it still follows the system volume.
 
-## Sounds and font
+## Sounds
 
 The help window (`?`) also picks the **button sound** and the **done sound**
 from every sound in the freedesktop sound theme
 (`/usr/share/sounds/freedesktop/stereo/`), grouped as good-for-timers and other
 system sounds (speaker test tones left out), or None. Picking one plays a preview.
+Both are saved as soon as they change.
 
-**Font** is *Match system* by default: fontconfig's `monospace`, the font
-`omarchy font set` changes. Open timers switch to a new system font
-straight away, no restart needed. *iA Writer* can be picked instead, and is the
-fallback if the system font can't be resolved. All of these are saved as soon
-as they change.
+The **font** always matches the system: fontconfig's `monospace`, the font
+`omarchy font set` changes. Open timers switch to a new system font straight
+away, no restart needed.
 
 ## Colors
 
@@ -82,9 +82,6 @@ light background stays in the theme's palette rather than flat white.
 Light and dark follow the theme's own `mode`, so switching to a light Omarchy
 theme switches the timer with it, live and without a restart. There's no manual
 light/dark toggle.
-
-Text follows the system monospace font unless iA Writer is picked in the help
-window (`ttf-ia-writer`, the face omacalc and omawrite use).
 
 The window is painted opaque and keeps Omarchy's `default-opacity` tag, so
 transparency is the compositor's job and Super+Alt+Backspace toggles this
