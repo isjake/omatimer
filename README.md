@@ -15,9 +15,9 @@ goes outside your home folder. `./install.sh --remove` uninstalls;
 `./install.sh --link` links to the build in this folder instead of copying it,
 so `make` updates the installed app (handy while working on it).
 
-Sounds use `pw-play` from `pipewire` (or `paplay`) and the files from
-`sound-theme-freedesktop`, which Omarchy doesn't include; `install.sh` adds it.
-Without them the timer runs silently.
+Sounds play with `pw-play` from `pipewire` (or `paplay`). The timer makes its
+own default sounds, and carries a copy of the freedesktop sound theme in
+`sounds/` for the rest, so nothing else needs installing.
 
 ## Build by hand
 
@@ -61,10 +61,14 @@ timer. It sets the sound's own volume, so it still follows the system volume.
 
 ## Sounds
 
-The help window (`?`) also picks the **button sound** and the **done sound**
-from every sound in the freedesktop sound theme
-(`/usr/share/sounds/freedesktop/stereo/`), grouped as good-for-timers and other
-system sounds (speaker test tones left out), or None. Picking one plays a preview.
+The help window (`?`) also picks the **button sound** and the **done sound**.
+The defaults are built in (*chime* when done, *click* for buttons, plus *bell*),
+made by the timer itself, so they work everywhere. The rest are the freedesktop
+sound theme, grouped as good-for-timers and other system sounds, or None. The
+system's copy (`/usr/share/sounds/freedesktop/stereo/`) is used when installed,
+otherwise the copy in `sounds/freedesktop/`. **That copy is not MIT**: the
+files keep their own GPL / LGPL / Creative Commons licenses, listed in
+`sounds/freedesktop/CREDITS`. Picking one plays a preview.
 Both are saved as soon as they change.
 
 The **font** always matches the system: fontconfig's `monospace`, the font
@@ -127,4 +131,5 @@ seven processes inflate it so much.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The sounds in `sounds/freedesktop/` are not
+covered by it; see that folder's README.

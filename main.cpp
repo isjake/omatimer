@@ -38,17 +38,102 @@
 #include <signal.h>
 #include <fontconfig/fontconfig.h>
 
-// The freedesktop sound theme: the stock set most Linux desktops ship, which
-// is where both sounds come from. Stored by name ("complete"), or "none".
+// Sounds are stored by name: a built-in one ("builtin-chime"), one from the
+// freedesktop sound theme ("complete"), or "none".
+//
+// The built-in ones are made here, so there's always something to play. The
+// freedesktop set is the system's copy if it's installed, otherwise the copy
+// in the repo's sounds/ folder (next to the binary when run from the repo,
+// or in share/omatimer/ when installed).
 static const char *kSoundDir = "/usr/share/sounds/freedesktop/stereo/";
-static const char *kDefaultButtonSound = "message";
-static const char *kDefaultDoneSound = "complete";
+static const char *kDefaultButtonSound = "builtin-click";
+static const char *kDefaultDoneSound = "builtin-chime";
+
+static QStringList soundDirs()
+{
+    const QString app = QCoreApplication::applicationDirPath();
+    return {QString::fromUtf8(kSoundDir), app + "/sounds/freedesktop/",
+            app + "/../share/omatimer/sounds/freedesktop/"};
+}
+
+struct Note {
+    double start, freq, level, decay; // seconds, Hz, 0..1, seconds to fade to ~37%
+};
+
+// A sine with a quieter, slightly inharmonic overtone (what makes a bell
+// sound like a bell), a 4 ms fade-in so it doesn't pop, and an exponential
+// fade-out. 16-bit mono WAV.
+static QByteArray synthWav(const QList<Note> &notes, double seconds)
+{
+    const int rate = 44100;
+    const int n = int(seconds * rate);
+    QList<double> mixed(n, 0.0);
+    for (const Note &note : notes)
+        for (int i = int(note.start * rate); i < n; ++i) {
+            const double t = i / double(rate) - note.start;
+            const double env = qMin(1.0, t / 0.004) * std::exp(-t / note.decay);
+            mixed[i] += note.level * env
+                        * (std::sin(2 * M_PI * note.freq * t)
+                           + 0.25 * std::sin(2 * M_PI * note.freq * 2.76 * t) * std::exp(-t / 0.15));
+        }
+    QByteArray pcm;
+    pcm.reserve(n * 2);
+    for (double v : mixed) {
+        const qint16 sample = qint16(qBound(-1.0, v, 1.0) * 32000);
+        pcm.append(reinterpret_cast<const char *>(&sample), 2); // little-endian on x86/ARM
+    }
+    QByteArray wav;
+    auto u32 = [&wav](quint32 v) { wav.append(reinterpret_cast<const char *>(&v), 4); };
+    auto u16 = [&wav](quint16 v) { wav.append(reinterpret_cast<const char *>(&v), 2); };
+    wav.append("RIFF");
+    u32(36 + pcm.size());
+    wav.append("WAVEfmt ");
+    u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16);
+    wav.append("data");
+    u32(pcm.size());
+    return wav + pcm;
+}
+
+static const QList<QPair<QString, QString>> &builtinSounds() // name, label
+{
+    static const QList<QPair<QString, QString>> list = {
+        {"builtin-chime", "chime"}, {"builtin-bell", "bell"}, {"builtin-click", "click"}};
+    return list;
+}
+
+// Written to the cache once, since the players want a file.
+static QString builtinSoundPath(const QString &name)
+{
+    QByteArray wav;
+    if (name == "builtin-chime") // three rising notes, C6 E6 G6
+        wav = synthWav({{0, 1046.5, 0.30, 0.45}, {0.14, 1318.5, 0.28, 0.45}, {0.28, 1568, 0.28, 0.6}}, 1.8);
+    else if (name == "builtin-bell") // one struck A5
+        wav = synthWav({{0, 880, 0.45, 0.7}}, 2.2);
+    else if (name == "builtin-click") // a short soft tick
+        wav = synthWav({{0, 1800, 0.35, 0.012}}, 0.08);
+    else
+        return QString();
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    const QString path = dir + "/" + name + ".wav";
+    if (QFileInfo(path).size() != wav.size()) {
+        QDir().mkpath(dir);
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly) || f.write(wav) != wav.size())
+            return QString();
+    }
+    return path;
+}
 
 static QString soundPath(const QString &name)
 {
     if (name.isEmpty() || name == "none")
         return QString();
-    return QString::fromUtf8(kSoundDir) + name + ".oga";
+    if (name.startsWith("builtin-"))
+        return builtinSoundPath(name);
+    for (const QString &dir : soundDirs())
+        if (QFileInfo::exists(dir + name + ".oga"))
+            return dir + name + ".oga";
+    return QString();
 }
 
 // fontconfig's "monospace" alias, resolved to a real name the way
@@ -799,13 +884,10 @@ private:
 
             // A line on where the sounds live, for anyone curious enough to
             // go looking or add their own.
-            const bool haveSounds = QDir(QString::fromUtf8(kSoundDir)).exists();
-            auto *source = new QLabel(haveSounds
-                ? QString("Sounds come from the freedesktop sound theme, the standard set most"
-                          " Linux desktops share, in %1. They play through PipeWire, the"
-                          " system's audio server, at the volume above.").arg(kSoundDir)
-                : QString("No sounds found: the freedesktop sound theme isn't installed."
-                          " Install it with: sudo pacman -S sound-theme-freedesktop"));
+            auto *source = new QLabel(
+                "Built-in sounds are made by the timer itself. The rest are the freedesktop"
+                " sound theme, the standard set most Linux desktops share. All play through"
+                " PipeWire, the system's audio server, at the volume above.");
             source->setObjectName("source");
             source->setWordWrap(true);
             QFont small(uiFontFamily());
@@ -864,8 +946,13 @@ private:
             "complete", "bell", "message", "message-new-instant", "alarm-clock-elapsed",
             "window-attention", "dialog-information", "service-login"};
 
-        const QStringList files = QDir(QString::fromUtf8(kSoundDir))
-                                      .entryList({"*.oga"}, QDir::Files, QDir::Name);
+        // The first folder that has any: the system's copy, else ours.
+        QStringList files;
+        for (const QString &dir : soundDirs()) {
+            files = QDir(dir).entryList({"*.oga"}, QDir::Files, QDir::Name);
+            if (!files.isEmpty())
+                break;
+        }
         QStringList usual, other;
         for (const QString &name : timerFriendly)
             if (files.contains(name + ".oga"))
@@ -898,6 +985,12 @@ private:
         auto *none = new QStandardItem("None");
         none->setData("none", Qt::UserRole);
         model->appendRow(none);
+        addHeading("Built in");
+        for (const auto &[name, label] : builtinSounds()) {
+            auto *item = new QStandardItem("  " + label);
+            item->setData(name, Qt::UserRole);
+            model->appendRow(item);
+        }
         if (!usual.isEmpty()) { addHeading("Good for timers"); addSounds(usual); }
         if (!other.isEmpty()) { addHeading("Other system sounds"); addSounds(other); }
         combo->setModel(model);
