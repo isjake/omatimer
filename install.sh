@@ -12,9 +12,11 @@ cd "$(dirname "$0")"
 bin="$HOME/.local/bin/$app"
 desktop="$HOME/.local/share/applications/$app.desktop"
 icon="$HOME/.local/share/icons/hicolor/scalable/apps/$app.svg"
+share="$HOME/.local/share/$app"
 
 if [ "$1" = "--remove" ]; then
     rm -f "$bin" "$desktop" "$icon"
+    rm -rf "${share:?}"
     echo "Removed $app."
     exit 0
 fi
@@ -26,8 +28,6 @@ missing=""
 { command -v g++ && command -v make; } >/dev/null 2>&1 || missing="$missing base-devel"
 command -v qmake6 >/dev/null 2>&1 || missing="$missing qt6-base"
 [ -f /usr/include/fontconfig/fontconfig.h ] || missing="$missing fontconfig"
-# Not for building: the sound files the timer plays. Omarchy doesn't ship them.
-[ -d /usr/share/sounds/freedesktop/stereo ] || missing="$missing sound-theme-freedesktop"
 if [ -n "$missing" ]; then
     echo "Installing:$missing"
     sudo pacman -S --needed --noconfirm $missing
@@ -45,6 +45,12 @@ else
 fi
 install -Dm 644 "data/$app.desktop" "$desktop"
 install -Dm 644 "data/$app.svg" "$icon"
+# The bundled sounds, found next to a linked binary but copied for an installed one.
+if [ -d sounds ] && [ "$1" != "--link" ]; then
+    rm -rf "${share:?}/sounds"
+    mkdir -p "$share"
+    cp -r sounds "$share/"
+fi
 update-desktop-database -q "$(dirname "$desktop")" 2>/dev/null || true
 
 echo "Installed $app. Find it in the app launcher, or run: $app"
