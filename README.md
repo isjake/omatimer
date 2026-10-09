@@ -2,6 +2,8 @@
 
 A native Qt6 countdown timer for Omarchy. One binary, no runtime.
 
+![omatimer](screenshots/omatimer.png)
+
 ## Install
 
 ```sh
