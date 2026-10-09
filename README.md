@@ -2,7 +2,9 @@
 
 A native Qt6 countdown timer for Omarchy. One binary, no runtime.
 
-![omatimer](screenshots/omatimer.png)
+<img src="screenshots/omatimer.png" alt="omatimer: two timers, one running and one done" width="400">
+
+Watch it in action: [video on r/omarchy](https://www.reddit.com/r/omarchy/comments/1x1pvyo/i_made_omasettings_to_change_window_appearance/).
 
 ## Install
 
