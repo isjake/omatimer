@@ -15,6 +15,12 @@ goes outside your home folder. `./install.sh --remove` uninstalls;
 `./install.sh --link` links to the build in this folder instead of copying it,
 so `make` updates the installed app (handy while working on it).
 
+To update later, pull and run the installer again:
+
+```sh
+cd omatimer && git pull && ./install.sh
+```
+
 Sounds play with `pw-play` from `pipewire` (or `paplay`). The timer makes its
 own default sounds, and carries a copy of the freedesktop sound theme in
 `sounds/` for the rest, so nothing else needs installing.
