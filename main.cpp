@@ -1,4 +1,4 @@
-// omatimer - a native Qt6 rewrite of papertimer.
+// omatimer - a native Qt6 countdown timer.
 // Type a duration, hit Enter/Space to start or stop, R to reset, Ctrl+M to
 // mute, ? for the shortcut list.
 
