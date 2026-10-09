@@ -5,4 +5,4 @@ omatimer
 aur/src/
 aur/pkg/
 aur/omatimer/
-aur/*.pkg.tar.zst
+aur/*.pkg.tar.*
