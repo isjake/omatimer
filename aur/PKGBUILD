@@ -1,7 +1,7 @@
 # Maintainer: Jake Ayala <jakeayala@gmail.com>
 pkgname=omatimer-git
 _name=omatimer
-pkgver=1.1.0.r3.g0ba8d01
+pkgver=1.1.0.r8.g63d01b4
 pkgrel=1
 pkgdesc="Small native Qt countdown timer for Omarchy"
 arch=('x86_64' 'aarch64')
