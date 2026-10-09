@@ -17,6 +17,10 @@ goes outside your home folder. `./install.sh --remove` uninstalls;
 `./install.sh --link` links to the build in this folder instead of copying it,
 so `make` updates the installed app (handy while working on it).
 
+There's no AUR package: AUR registration is closed until further notice,
+so omatimer couldn't be published there. The `aur/` folder holds a ready
+recipe for when it reopens.
+
 To update later, pull and run the installer again:
 
 ```sh
