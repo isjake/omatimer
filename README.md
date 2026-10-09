@@ -1,6 +1,6 @@
 # omatimer
 
-A native Qt6 rewrite of papertimer. One binary, no runtime, no browser.
+A native Qt6 countdown timer for Omarchy. One binary, no runtime.
 
 ## Install
 
@@ -96,44 +96,6 @@ light/dark toggle.
 The window is painted opaque and keeps Omarchy's `default-opacity` tag, so
 transparency is the compositor's job and Super+Alt+Backspace toggles this
 window along with everything else.
-
-## Differences from the Electron version
-
-- Countdown runs against a wall-clock deadline, so a slow or blocked tick
-  can't make the timer drift.
-- Last duration persists across restarts
-  (`~/.config/omarchy/omatimer.conf`), which was an open TODO in papertimer.
-- The play, reset, mute and help marks are drawn with QPainter rather than
-  typed as glyphs, which several monospace faces are missing.
-- A hairline under the number fills as the timer runs.
-- Font size scales with the window instead of via CSS media queries. One
-  unit derived from both width and height drives every size, so the layout
-  holds its proportions in a short-wide or tall-narrow window.
-- Sounds come from `/usr/share/sounds/freedesktop/stereo/`, so no bundled
-  audio files. They're handed to `pw-play` (falling back to `paplay`) rather
-  than Qt Multimedia, which would load FFmpeg, the VA-API video driver, GTK3
-  and Qt Quick just to play a one-second chime — about 24 MB of PSS and a
-  pile of VDPAU warnings on every launch.
-
-## Measured against the Electron build
-
-Both apps open, same machine (7.8 GB RAM), idle timer unless noted.
-
-| | Electron papertimer | omatimer |
-|---|---|---|
-| Processes | 7 | 1 |
-| Threads | 74 | 12 |
-| RAM (PSS) | 242 MB | 41 MB |
-| RAM (RSS) | 583 MB | 76 MB |
-| CPU, idle | 1.30% | 0.05% |
-| CPU, timer running | 0.83% | 0.43% |
-| Install size | 446 MB | 60 KB binary |
-| Files on disk | 10,972 | 6 |
-| Cold start to window | 0.84 s | 0.38 s |
-
-PSS is the fair memory number — it splits shared libraries between the
-processes using them. RSS double-counts those, which is why Electron's
-seven processes inflate it so much.
 
 ## License
 
