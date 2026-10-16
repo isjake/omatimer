@@ -1,16 +1,22 @@
-# omatimer
+# omatimer (deprecated)
 
-A native Qt6 countdown timer for Omarchy. One binary, no runtime.
+> [!IMPORTANT]
+> **This app is deprecated. Use [Omatimer the plugin](https://github.com/isjake/omatimer-plugin) instead.**
+>
+> The plugin does what this app does, plus a timer in the bar. It's listed and Verified on the
+> [Omarchy plugin marketplace](https://plugins.omarchy.org/plugin.html?id=io.github.isjake.omatimer),
+> and there's nothing to build:
+>
+> ```sh
+> omarchy plugin add https://github.com/isjake/omatimer-plugin.git --enable
+> ```
+>
+> This Qt app still works, but it gets no more updates or fixes.
 
-> **There's now a plugin version:** [omatimer-plugin](https://github.com/isjake/omatimer-plugin),
-> listed and Verified on the [Omarchy plugin marketplace](https://plugins.omarchy.org/plugin.html?id=io.github.isjake.omatimer).
-> Nothing to build: `omarchy plugin add https://github.com/isjake/omatimer-plugin.git --enable`.
-> Timers are real windows (tile, float, Super+W) like this app, or one timer in the bar.
-> This Qt app still works and stays here, but new work goes into the plugin.
+If you already use the app, install the plugin, then remove the app with
+`./install.sh --remove` from this folder.
 
-<img src="screenshots/omatimer.png" alt="omatimer: two timers, one running and one done" width="400">
-
-Watch it in action: [video on r/omarchy](https://www.reddit.com/r/omarchy/comments/1x1pvyo/i_made_omasettings_to_change_window_appearance/).
+The rest of this page documents the old Qt6 app.
 
 ## Install
 
